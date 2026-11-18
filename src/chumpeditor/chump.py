@@ -12,7 +12,9 @@ The binary layout (all values little-endian) is::
 A tag length counts everything after itself: the name length byte, the name,
 its NUL, the type byte and the value, which for a container is the whole run
 of its sub-tags.  The content length in the header likewise counts only what
-follows it.
+follows it.  Tag names and string values are plain bytes in the file; CDP
+Explorer, the tool the format description comes from, reads them as UTF-8, and
+so does this code.
 
 Values are kept as Python types that map straight onto the text form, so
 ``pack_chump(parse_text(render_text(parse_chump(data))))`` reproduces the
@@ -26,10 +28,9 @@ input byte for byte:
     type 05  null       ->  None
     type 0d  kuid       ->  Kuid, "<kuid:uid:cid>" / "<kuid2:uid:cid:version>"
 
-An int or float tag whose value is longer than 4 bytes holds a run of them
-(``camera   -1.058,0.522,0.887`` in a config.txt), which is stored inline
-rather than as one of the array types.  A type byte with bit 7 set is an
-array, where each element carries its own length.
+An int or float tag whose value is longer than one element holds a run of
+them, one after another until the tag length is used up, and the text form
+writes that run comma separated (``camera   -1.058,0.522,0.887``).
 
 Unknown types are kept as ``RawValue``: their bytes are preserved so a file
 that uses types this code does not know about still round-trips.
@@ -47,8 +48,10 @@ MAGIC = b"ACS$"
 #: the version word every chump file carries, 01 00 00 00 on disk
 DEFAULT_VERSION = 1
 FORMAT_VERSION = DEFAULT_VERSION  # kept as the VB.NET code named it
-NAME_ENCODING = "latin-1"  # tag names are single bytes in the format itself
-TEXT_ENCODING = "utf-8"  # string values, read and written with surrogateescape
+NAME_ENCODING = "utf-8"  # tag names are bytes in the file, UTF-8 in CDP Explorer
+TEXT_ENCODING = "utf-8"  # string values, same, with a NUL on the end
+# both decode and encode with surrogateescape so bytes that are not valid UTF-8
+# still survive a read/write cycle instead of turning into replacement marks
 DEFAULT_EXTENSION = ".chump"
 
 
@@ -66,26 +69,8 @@ class TagType:
     BINARY = 0x04
     NULL = 0x05
     INT64 = 0x06
-    ARRAY_INT32 = 0x07
-    ARRAY_FLOAT32 = 0x08
-    ARRAY_STRING = 0x09
-    ARRAY_BINARY = 0x0A
-    ARRAY_INT64 = 0x0B
     KUID = 0x0D
-    ARRAY_KUID = 0x0E
 
-    # bit 7 of a type code marks an array of the type in the low 7 bits
-
-
-#: type code -> the array type holding several of it
-_ARRAY_TYPES = {
-    TagType.INT32: TagType.ARRAY_INT32,
-    TagType.FLOAT32: TagType.ARRAY_FLOAT32,
-    TagType.STRING: TagType.ARRAY_STRING,
-    TagType.BINARY: TagType.ARRAY_BINARY,
-    TagType.INT64: TagType.ARRAY_INT64,
-    TagType.KUID: TagType.ARRAY_KUID,
-}
 
 #: the column the value is written from, as in the original expander output
 VALUE_COLUMN = 40
@@ -100,14 +85,23 @@ _NAME_MAX = 0xFF - 1  # the name length byte counts the terminating NUL
 class Tag:
     """One tag of the tree: a container (no value_type) or a value tag.
 
-    ``value_type`` doubles as the container/array flag: bit 7 marks an
-    aggregate, the low 7 bits the type of the values it holds.
+    A value tag holds a single value, or a run of them of one type when its
+    value is a list; that is how an int or float tag stores a vector.
     """
 
     name: str
     tags: list["Tag"] = field(default_factory=list)
     value: object = None
     value_type: int | None = None
+
+    def __post_init__(self) -> None:
+        # Tag("light", value=1) is a value tag, not an empty container: give it
+        # the type its value implies, the way value_tag() does.
+        if self.value is not None and self.value_type is None:
+            self.value_type = _type_of(self.value)
+        elif self.value_type == TagType.KUID:
+            # a kuid is written without quotes, so it has to travel as a Kuid
+            self.value = _as_kuids(self.value)
 
     @classmethod
     def container(cls, name: str, tags: Sequence["Tag"] = ()) -> "Tag":
@@ -126,7 +120,8 @@ class Tag:
 
     @property
     def is_array(self) -> bool:
-        return self.value_type is not None and bool(self.value_type & 0x80)
+        """A tag holding a run of values instead of a single one."""
+        return isinstance(self.value, (list, tuple))
 
     def get(self, name: str) -> "Tag | None":
         """The first child tag with this name, or None."""
@@ -142,7 +137,8 @@ class Tag:
             self.name == other.name
             and self.value_type == other.value_type
             and _values_equal(self.value, other.value)
-            and self.tags == other.tags
+            # tags may be handed over as a tuple or read back as a list
+            and tuple(self.tags) == tuple(other.tags)
         )
 
 
@@ -164,17 +160,33 @@ def _type_of(value: object) -> int:
         return TagType.INT32 if -(2**31) <= value < 2**31 else TagType.INT64
     if isinstance(value, float):
         return TagType.FLOAT32
+    if isinstance(value, Kuid):  # before str, since a Kuid is a str subclass
+        return TagType.KUID
     if isinstance(value, str):
         return TagType.STRING
     if isinstance(value, (bytes, bytearray)):
         return TagType.BINARY
-    if isinstance(value, Kuid):
-        return TagType.KUID
+    if isinstance(value, RawValue):  # a type code the reader did not know
+        return value.type_id
     if isinstance(value, (list, tuple)):
         if not value:
             raise ChumpError("cannot guess the element type of an empty list")
-        return _ARRAY_TYPES[_type_of(value[0])]
+        # a run of values is stored inline, under the element's own type code
+        return _type_of(value[0])
     raise ChumpError(f"unsupported value type: {type(value).__name__}")
+
+
+def _as_kuids(value: object) -> object:
+    """Turn the text of a kuid into a Kuid, wherever the tag holds it.
+
+    The text form writes a kuid bare and a string quoted, so a tag typed KUID
+    keeps a Kuid even when the caller handed over a plain str.
+    """
+    if isinstance(value, (list, tuple)):
+        return [item if isinstance(item, Kuid) else Kuid(item) for item in value]
+    if isinstance(value, str) and not isinstance(value, Kuid):
+        return Kuid(value)
+    return value
 
 
 def _values_equal(left: object, right: object) -> bool:
@@ -184,6 +196,14 @@ def _values_equal(left: object, right: object) -> bool:
         return len(left) == len(right) and all(
             _values_equal(a, b) for a, b in zip(left, right)
         )
+    if isinstance(left, float) and isinstance(right, float):
+        # the format stores single precision, so two floats are the same value
+        # when their float32 bytes are; 1.2999999523162842 and 1.3 both come
+        # from the same four bytes, and the text form only ever writes "1.3"
+        try:
+            return struct.pack("<f", left) == struct.pack("<f", right)
+        except (OverflowError, ValueError):  # too big for a float32
+            return left == right
     return left == right
 
 
@@ -230,7 +250,7 @@ def kuid_to_hex(text: str) -> bytes:
     uid, cid, version = parse_kuid(text)
     if not _UID_MIN <= uid <= _UID_MAX:
         raise ChumpError(f"kuid uid out of range: {uid}")
-    if not 0 <= cid < 2**32:
+    if not -(2**31) <= cid < 2**31:  # the content id is a signed 32 bit value
         raise ChumpError(f"kuid content id out of range: {cid}")
     if not 0 <= version < 128:
         raise ChumpError(f"invalid kuid version: {version}")
@@ -238,27 +258,37 @@ def kuid_to_hex(text: str) -> bytes:
     # a negative uid has the sign bit of its 25 bits set, which leaves no room
     # for a version: its top bits are just sign extension
     word = (version << _UID_BITS) | (uid & ((1 << _UID_BITS) - 1)) if version else uid
+    word &= 0xFFFFFFFF  # a version of 64 or more sets the sign bit of the word
+    if word >= 2**31:
+        word -= 2**32
     return struct.pack("<ii", word, cid)
 
 
 def hex_to_kuid(data: bytes) -> Kuid:
-    """The ``<kuid:uid:cid>`` literal for 8 kuid bytes."""
+    """The ``<kuid:uid:cid>`` literal for 8 kuid bytes.
+
+    The first word is UUUVNNNN: 25 bits of signed uid, then 7 bits of version.
+    A negative uid has its sign bit set, so those 7 bits read back as 127; the
+    version is only real for a positive uid, and a kuid with no version is
+    written the short way, like Trainz displays it.
+    """
     if len(data) != 8:
         raise ChumpError(f"a kuid is 8 bytes, got {len(data)}")
-    word, cid = struct.unpack("<ii", data)
+    word, cid = struct.unpack("<Ii", data)
     version = word >> _UID_BITS
     uid = word & ((1 << _UID_BITS) - 1)
     uid = uid - (1 << _UID_BITS) if uid > _UID_MAX else uid
-    if version <= 0 or version > 127:  # top bits are only sign extension
-        return Kuid(f"<kuid:{uid}:{cid}>")
-    return Kuid(f"<kuid2:{uid}:{cid}:{version}>")
+    if (version > 0 and uid > 0) or (version == 0 and uid < 0):
+        return Kuid(f"<kuid2:{uid}:{cid}:{version}>")
+    return Kuid(f"<kuid:{uid}:{cid}>")
 
 
 def parse_kuid(text: str) -> tuple[int, int, int]:
     """The uid, content id and version of a ``<kuid...>`` literal.
 
-    A lone number is taken as an uid, like the original code did, and a
-    negative uid never carries a version.
+    Read the way the Trainz tools read it: the brackets and the ``kuid`` word
+    are optional, a lone number is an uid on its own, and a kuid with no
+    version written down has version 0.
     """
     body = text.strip()
     if body.startswith("<") and body.endswith(">"):
@@ -282,8 +312,6 @@ def parse_kuid(text: str) -> tuple[int, int, int]:
         version = int(parts[2]) if len(parts) == 3 else 0
     except ValueError as exc:
         raise ChumpError(f"invalid kuid: {text}") from exc
-    if uid < 0:
-        return uid, cid, 0
     return uid, cid, version
 
 
@@ -298,7 +326,19 @@ def parse_chump(data: bytes) -> Tag:
         raise ChumpError(f"not a chump file (starts with {data[:4]!r})")
     body = data[12:]
     (size,) = struct.unpack_from("<I", body, 0)
-    return parse_tag_tree(body[4:4 + size])
+    if size != len(body) - 4:
+        # the original expander stopped reading at the declared length; a file
+        # that does not end there is truncated or padded, and saying so beats
+        # returning half a tree
+        raise ChumpError(
+            f"content length {size} does not match the {len(body) - 4} bytes that follow the header"
+        )
+    return parse_tag_tree(body[4:])
+
+
+def load_chump(path: str | Path) -> Tag:
+    """Read a .chump file from disk and return its tags."""
+    return parse_chump(Path(path).read_bytes())
 
 
 def parse_tag_tree(data: bytes) -> Tag:
@@ -314,7 +354,10 @@ def iter_tags(data: bytes) -> Iterator[Tag]:
         if len(data) - offset < 5:
             raise ChumpError(f"tag header truncated at {offset}")
         (size,) = struct.unpack_from("<I", data, offset)
-        if size < 4 or offset + 4 + size > len(data):
+        if size < 4:
+            # name length byte, name, NUL and type byte cannot fit in less
+            raise ChumpError(f"tag length {size} at {offset} is too small for a tag")
+        if offset + 4 + size > len(data):
             raise ChumpError(f"tag length {size} at {offset} runs past the end")
         yield _parse_tag(data[offset + 4:offset + 4 + size])
         offset += 4 + size
@@ -323,32 +366,17 @@ def iter_tags(data: bytes) -> Iterator[Tag]:
 def _parse_tag(body: bytes) -> Tag:
     """One tag, from the bytes that follow its length."""
     (name_len,) = struct.unpack_from("<B", body, 0)
+    # the name length byte counts the name and its NUL; the type byte follows
     if name_len < 2 or name_len + 2 > len(body):
-        raise ChumpError(f"bad tag header at start of {body[:8]!r}")
+        raise ChumpError(f"tag name length {name_len} does not fit in {len(body)} bytes")
     if body[name_len] != 0:
         raise ChumpError("tag name is not NUL terminated")
-    name = body[1:name_len].decode(NAME_ENCODING)
+    name = body[1:name_len].decode(NAME_ENCODING, "surrogateescape")
     value_type = body[name_len + 1]
     value_bytes = body[name_len + 2:]
 
     if value_type == TagType.CONTAINER:
         return Tag(name, list(iter_tags(value_bytes)))
-
-    if value_type & 0x80:  # array: the length is repeated for every element
-        element_type = value_type & 0x7F
-        values: list[object] = []
-        offset = 0
-        while offset < len(value_bytes):
-            if len(value_bytes) - offset < 4:
-                raise ChumpError(f"array element truncated in tag {name!r}")
-            (element_len,) = struct.unpack_from("<I", value_bytes, offset)
-            if offset + 4 + element_len > len(value_bytes):
-                raise ChumpError(f"array element length in tag {name!r} is wrong")
-            values.append(
-                _parse_value(element_type, value_bytes[offset + 4:offset + 4 + element_len])
-            )
-            offset += 4 + element_len
-        return Tag(name, (), values, value_type)
 
     return Tag(name, (), _parse_value(value_type, value_bytes), value_type)
 
@@ -372,13 +400,18 @@ def _parse_value(value_type: int, data: bytes) -> object:
         values = [value for (value,) in struct.iter_unpack("<f", data)]
         return values[0] if len(values) == 1 else values
     if value_type == TagType.STRING:
-        return data.split(b"\x00", 1)[0].decode(TEXT_ENCODING, "surrogateescape")
+        # the value is NUL terminated; only that terminator is dropped, a NUL in
+        # the middle is part of the string and goes back in when packing
+        if data.endswith(b"\x00"):
+            data = data[:-1]
+        return data.decode(TEXT_ENCODING, "surrogateescape")
     if value_type == TagType.BINARY:
         return data
     if value_type == TagType.KUID:
-        if len(data) < 8:
+        if len(data) % 8 or not data:
             raise ChumpError("kuid tag truncated")
-        return hex_to_kuid(data[:8])
+        values = [hex_to_kuid(chunk) for (chunk,) in struct.iter_unpack("<8s", data)]
+        return values[0] if len(values) == 1 else values
     return RawValue(value_type, data)
 
 
@@ -398,6 +431,7 @@ def write_chump(root: Tag, stream: BinaryIO, *, version: int = FORMAT_VERSION) -
 def dump_chump(root: Tag, path: str | Path, *, version: int = FORMAT_VERSION) -> Path:
     """Write a CHUMP file to disk. Returns the path written."""
     target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("wb") as stream:
         write_chump(root, stream, version=version)
     return target
@@ -420,19 +454,18 @@ def _pack_tag(tag: Tag) -> bytes:
         body = pack_tag_tree(tag.tags)
         value_type = TagType.CONTAINER
     else:
-        value_type = tag.value_type if tag.value_type is not None else _type_of(tag.value)
-        if value_type & 0x80:  # array: every element carries its own length
-            element_type = value_type & 0x7F
-            values = tag.value if isinstance(tag.value, (list, tuple)) else [tag.value]
-            body = b"".join(
-                struct.pack("<I", len(_pack_value(element_type, value)))
-                + _pack_value(element_type, value)
-                for value in values
-            )
-        else:
-            body = _pack_value(value_type, tag.value)
+        # not None: is_container is exactly "value_type is None"
+        value_type = tag.value_type
+        body = _pack_value(value_type, tag.value)
 
-    name = tag.name.encode(NAME_ENCODING)
+    try:
+        name = tag.name.encode(NAME_ENCODING, "surrogateescape")
+    except UnicodeEncodeError as exc:  # only a surrogate pair outside the escape range
+        raise ChumpError(f"tag name {tag.name!r} cannot be encoded: {exc}") from exc
+    if not name:
+        raise ChumpError("a tag needs a name")
+    if b"\x00" in name:
+        raise ChumpError(f"tag name {tag.name!r} contains a NUL")
     if len(name) > _NAME_MAX:
         raise ChumpError(f"tag name too long: {tag.name!r}")
     # the length counts the name length byte, the name, its NUL, the type and
@@ -444,6 +477,16 @@ def _pack_tag(tag: Tag) -> bytes:
 
 
 def _pack_value(value_type: int, value: object) -> bytes:
+    """The value bytes; anything struct refuses becomes a ChumpError."""
+    try:
+        return _encode_value(value_type, value)
+    except ChumpError:
+        raise  # already says what is wrong with the value
+    except (struct.error, OverflowError, TypeError, ValueError) as exc:
+        raise ChumpError(f"cannot store {value!r} as type {value_type:#02x}: {exc}") from exc
+
+
+def _encode_value(value_type: int, value: object) -> bytes:
     if value_type == TagType.NULL:
         return b""
     if value_type in (TagType.INT32, TagType.INT64):
@@ -454,14 +497,27 @@ def _pack_value(value_type: int, value: object) -> bytes:
         values = value if isinstance(value, (list, tuple)) else [value]
         return b"".join(struct.pack("<f", float(item)) for item in values)
     if value_type == TagType.STRING:
+        _one_value(value_type, value)
         return str(value).encode(TEXT_ENCODING, "surrogateescape") + b"\x00"
     if value_type == TagType.BINARY:
+        _one_value(value_type, value)
         return bytes(value)
     if value_type == TagType.KUID:
-        return kuid_to_hex(str(value))
+        # the spec spells a kuid as 8 bytes and repeats that run until the tag
+        # length is used up, same as the other number types
+        values = value if isinstance(value, (list, tuple)) else [value]
+        return b"".join(kuid_to_hex(str(item)) for item in values)
     if isinstance(value, RawValue):
         return value.data
     raise ChumpError(f"cannot write value type {value_type:#02x}")
+
+
+def _one_value(value_type: int, value: object) -> None:
+    """A string or binary tag holds one value, never a run of them."""
+    if isinstance(value, (list, tuple)):
+        raise ChumpError(
+            f"tag value type {value_type:#02x} holds one value, not {len(value)}"
+        )
 
 
 def _as_int(value: object) -> int:
@@ -492,7 +548,10 @@ def dump_text(root: Tag, path: str | Path, *, eol: str = "\r\n") -> Path:
     it produced start with one.
     """
     target = Path(path)
-    with target.open("w", encoding="utf-8-sig", newline="") as stream:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open(
+        "w", encoding="utf-8-sig", errors="surrogateescape", newline=""
+    ) as stream:
         stream.write(render_text(root, eol=eol))
     return target
 
@@ -527,8 +586,8 @@ def _render_value(value: object, value_type: int | None) -> str:
     if value is None:
         return ""
     if isinstance(value, (list, tuple)):
-        element_type = value_type & 0x7F if value_type and value_type & 0x80 else value_type
-        return ",".join(_render_one(item, element_type) for item in value)
+        # a run of values of one type, comma separated, like a vector
+        return ",".join(_render_one(item, value_type) for item in value)
     return _render_one(value, value_type)
 
 
@@ -566,9 +625,12 @@ def read_text_file(path: str | Path) -> str:
     """The text of a chump text file, without the BOM the format starts with.
 
     Line endings are kept as they are on disk so a value that spans lines
-    survives a round trip unchanged.
+    survives a round trip unchanged, and surrogateescape means a value holding
+    bytes that are not valid UTF-8 comes back as the same bytes.
     """
-    with Path(path).open("r", encoding="utf-8-sig", newline="") as stream:
+    with Path(path).open(
+        "r", encoding="utf-8-sig", errors="surrogateescape", newline=""
+    ) as stream:
         return stream.read()
 
 
@@ -581,9 +643,9 @@ def parse_text(text: str) -> Tag:
     multi line license strings of a config.txt survive a round trip.
     """
     lines, eol = _split_lines(text)
-    tags, index = _parse_lines(lines, 0, 0, eol)
+    tags, index = _parse_lines(lines, 0, eol)
     if index != len(lines):
-        raise ChumpError(f"unbalanced '}}' on line {index + 1}")
+        raise ChumpError(f"line {index + 1}: '}}' with no container open")
     return Tag("<root>", tags)
 
 
@@ -602,31 +664,51 @@ def load_text(path: str | Path) -> Tag:
     return parse_text(read_text_file(path))
 
 
-def _parse_lines(lines: list[str], index: int, level: int, eol: str) -> tuple[list[Tag], int]:
+def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int]:
+    """The tags in one container body, up to the ``}`` that closes it.
+
+    The braces say where a container ends; the indentation is only for people,
+    so a file indented with four spaces reads the same as one with two.
+    """
     tags: list[Tag] = []
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
-        indent = len(line) - len(line.lstrip(" "))
 
-        if not stripped or stripped == "}":
+        if not stripped:
             index += 1
             continue
-        if stripped == "{":  # an empty or malformed container body
-            raise ChumpError(f"line {index + 1}: '{{' without a tag name before it")
-        if indent < level:
+        if stripped == "}":
+            # leave the brace for the caller, which knows which container it
+            # closes; at the top level nothing can close, and parse_text says so
             return tags, index
-        if indent > level:
-            raise ChumpError(f"line {index + 1}: unexpected indent")
+        if stripped == "{":
+            raise ChumpError(f"line {index + 1}: '{{' without a tag name before it")
 
         name, rest = _split_name(stripped)
+        opened_at = index
         index += 1
-        if rest:
+        if rest == "{":
+            # a container, its opening brace on the name's own line, the way
+            # most config.txt files write "kuid-table {"
+            children, index = _parse_lines(lines, index, eol)
+            if index >= len(lines):
+                raise ChumpError(
+                    f"line {opened_at + 1}: container '{name}' is never closed"
+                )
+            index += 1
+            tags.append(Tag.container(name, children))
+        elif rest:
             value, value_type, index = _parse_value_text(rest, lines, index, eol)
             tags.append(Tag.value_tag(name, value, value_type))
-            continue
-        if index < len(lines) and lines[index].strip() == "{":
-            children, index = _parse_lines(lines, index + 1, level + 2, eol)
+        elif index < len(lines) and lines[index].strip() == "{":
+            index += 1
+            children, index = _parse_lines(lines, index, eol)
+            if index >= len(lines):
+                raise ChumpError(
+                    f"line {opened_at + 1}: container '{name}' is never closed"
+                )
+            index += 1  # past the '}' the inner call stopped at
             tags.append(Tag.container(name, children))
         else:
             tags.append(Tag.value_tag(name, None, TagType.NULL))
@@ -671,10 +753,17 @@ def _parse_value_text(rest: str, lines: list[str], index: int, eol: str) -> tupl
         # one tag holding several values of the same type, no array header
         values, value_type = [], None
         for part in parts:
-            value, value_type, index = _parse_one_text(part, lines, index, eol)
+            if not part:
+                raise ChumpError(f"the value {rest!r} has an empty element")
+            value, part_type, index = _parse_one_text(part, lines, index, eol)
+            if value_type is None:
+                value_type = part_type
+            elif part_type != value_type:
+                raise ChumpError(
+                    f"the value {rest!r} mixes a type 0x{value_type:02x} "
+                    f"with a type 0x{part_type:02x}"
+                )
             values.append(value)
-        if value_type is None:
-            raise ChumpError(f"cannot read the value {rest!r}")
         return values, value_type, index
 
     return _parse_one_text(rest, lines, index, eol)
