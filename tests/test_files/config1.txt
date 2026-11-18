@@ -1,0 +1,26 @@
+﻿
+trackside                               2.5
+category-class                          "WA"
+username                                "Ro (n) bla-tab prev"
+author                                  "s"
+contact-email                           "s"
+contact-website                         "www"
+license                                 "Free for all users"
+kind                                    "scenery"
+category-region                         "RO"
+trainz-build                            2.5
+category-era                            
+
+mesh-table
+{
+  default
+  {
+    auto-create                         1
+    mesh                                "tab_prev.im"
+  }
+}
+kuid                                    <kuid:1984:101435>
+
+kuid-table
+{
+}

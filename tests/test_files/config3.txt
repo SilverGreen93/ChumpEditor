@@ -1,0 +1,34 @@
+﻿
+kind                                  "scenery"
+region                                "Romania"
+type                                  "CFR"
+light                                 1
+description                           "Curve indicator"
+mesh-table
+{
+  default
+  {
+    mesh                              "ind.im"
+    auto-create                       1
+    effects
+    {
+    }
+  }
+}
+asset-filename                        "ind"
+category-region-0                     "RO"
+category-class                        "BC"
+category-era-0                        "1980s"
+category-era-1                        "1990s"
+category-era-2                        "2000s"
+username                              "RTS Indicator curba mic d"
+author                                "Udar"
+organisation                          "RTS"
+contact-email                         "stanescu.radu@gmail.com"
+contact-website                       "www.trainzro.com"
+license                               "Any modification of the model or textures without authors permission is prohibited.
+Also, the content can not be redistributed without permission."
+kuid                                  <kuid:-2:1310>
+kuid-table
+{
+}

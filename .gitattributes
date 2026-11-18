@@ -1,0 +1,57 @@
+###############################################################################
+# Set default behavior to automatically normalize line endings.
+###############################################################################
+* text=auto
+
+###############################################################################
+# The CHUMP files are binary containers, and the .txt files next to them are
+# their reference expansions: both must be stored byte for byte, or the
+# round-trip tests compare against files git has already rewritten.
+###############################################################################
+*.chump -text
+*.cdp -text
+tests/test_files/** -text
+
+###############################################################################
+# Python sources
+###############################################################################
+*.py text eol=lf
+
+###############################################################################
+# Batch / PowerShell scripts must keep CRLF to be runnable on Windows.
+###############################################################################
+*.ps1  text eol=crlf
+*.cmd  text eol=crlf
+*.bat  text eol=crlf
+
+###############################################################################
+# WiX sources and the installer build script keep CRLF for Windows tools.
+###############################################################################
+*.wxs  text eol=crlf
+*.wxi  text eol=crlf
+
+###############################################################################
+# Document files.
+###############################################################################
+*.rtf	 diff=astextplain
+*.RTF	 diff=astextplain
+*.pdf   diff=astextplain
+*.PDF   diff=astextplain
+*.docx  diff=astextplain
+*.DOCX	diff=astextplain
+*.dotx  diff=astextplain
+*.DOTX  diff=astextplain
+*.doc   diff=astextplain
+*.DOC   diff=astextplain
+*.dot   diff=astextplain
+*.DOT   diff=astextplain
+*.ppt   diff=astextplain
+*.PPT   diff=astextplain
+*.pptx	diff=astextplain
+*.PPTX	diff=astextplain
+*.xls   diff=astextplain
+*.XLS   diff=astextplain
+*.xlsx	diff=astextplain
+*.XLSX	diff=astextplain
+*.xlsm	diff=astextplain
+*.XLSM	diff=astextplain

@@ -1,0 +1,29 @@
+﻿
+kind                                    "interior"
+kuid                                    <kuid:79373:50023>
+category-class                          "PC"
+category-region-0                       "RO"
+category-era-0                          "1980s"
+category-era-1                          "1990s"
+category-era-2                          "2000s"
+company                                 "CFR Calatori"
+description                             "."
+asset-filename                          "interior"
+name                                    "CFR interior"
+
+obsolete-table
+{
+}
+trainz-build                            1.3
+camera                                  -1.058,0.522,0.887
+username                                "CFR interior"
+author                                  "Bogdan Mihai"
+organisation                            "TrainzRO"
+contact-email                           "ceferistu@totalnet.ro"
+contact-website                         "www.trainz.ro"
+license                                 "Any modification of the model or textures without authors permission is prohibited.
+Also, the content can not be redistributed without permission."
+
+kuid-table
+{
+}

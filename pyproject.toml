@@ -1,0 +1,25 @@
+[project]
+name = "chumpeditor"
+version = "1.0"
+description = "Convert Trainz .chump files to and from their text form"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.5"]
+test = ["pytest>=7"]
+build = ["pyinstaller>=6", "pillow>=10"]  # pillow: PyInstaller converts .ico -> .icns on macOS
+
+[project.scripts]
+chumpeditor = "chumpeditor.cli:main"
+chumpeditor-gui = "chumpeditor.gui:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

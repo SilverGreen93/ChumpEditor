@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# PyInstaller
+*.spec
+
+# WiX
+installer/bin/
+installer/obj/
+
+# Editors / OS
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
