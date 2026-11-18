@@ -7,7 +7,7 @@ supports:
     Windows       -> dist/ChumpEditor.exe            (one-file, GUI)
                      dist/ChumpEditorCli.exe         (one-file, console CLI)
                      dist/ChumpEditor-<ver>-windows.zip  (both exes, released)
-    macOS         -> dist/ChumpEditor-<ver>.dmg      (.app bundle + hdiutil)
+    macOS         -> dist/ChumpEditor-<ver>-macos.dmg  (.app bundle + hdiutil)
     Linux (deb)   -> dist/chumpeditor_<ver>_amd64.deb   (needs fpm)
     Linux (zst)   -> dist/chumpeditor-<ver>-x86_64.pkg.tar.zst (needs fpm)
 
