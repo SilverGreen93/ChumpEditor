@@ -3,9 +3,7 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SilverGreen93/ChumpEditor)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) [![Downloads (Latest Release)](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/latest/total?label=latest%20release%20downloads)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/total?label=total%20downloads)
 
 Converts Trainz `.chump` files - the binary form of an asset's `config.txt` -
-to and from their readable text form. A Python rewrite of the *Chump expander*
-by vvmm (2016): same window, plus a command line and the way back, which the
-original never had.
+to and from their readable text form.
 
 ![screenshot](assets/screenshot.png)
 
@@ -180,12 +178,11 @@ floats, strings, nulls, kuids - survives.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE). Port of the Chump expander by vvmm, also
-GPL-3.0.
+GPL-3.0. See [LICENSE](LICENSE).
 
-## Related
+## Related software
 
-* [CDP Explorer](https://github.com/SilverGreen93/CDPExplorer) - browse a
-  `.cdp`/`.chump` instead of converting it
-* [TZarchiver](https://github.com/SilverGreen93/TZarchiver) - Trainz `.tzarc`
-  archives
+- [CDP Explorer](https://github.com/SilverGreen93/CDPExplorer) - browse and extract `.cdp` files
+- [TZarchiver](https://github.com/SilverGreen93/TZarchiver) - extract and create `.tzarc` archives
+- [Kuid Lister](https://github.com/SilverGreen93/KuidLister) - create lists of KUIDs from plain text
+- [Kuid2Hash](https://github.com/SilverGreen93/Kuid2Hash) - convert KUIDs to binary and get the hash folder

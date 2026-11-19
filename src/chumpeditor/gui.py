@@ -38,7 +38,7 @@ _ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
 APP_TITLE = f"ChumpEditor {__version__}"
 ICON_FILE = "chumpeditor.ico"
 DROP_HINT = "Drag & drop .chump and .txt files here"
-CREDIT = "ChumpEditor, after the Chump expander by vvmm (c) 2016"
+CREDIT = "© 2026 SilverGreen93"
 
 
 def _resource_path(name: str) -> str | None:
