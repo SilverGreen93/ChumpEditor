@@ -239,21 +239,33 @@ class ChumpWindow(QMainWindow):
         return str(self._folder) if self._folder else ""
 
     def _ok_to_replace(self) -> bool:
-        """Whether the editor may be cleared, asking first if anything is at risk."""
+        """Whether the editor may be cleared, asking first if anything is at risk.
+
+        The work is asked about the way every other program asks about it: Save
+        writes it out and carries on, Discard throws it away, Cancel stops where
+        it was.  A box that only offers to discard leaves nobody any way to keep
+        the very work it has just warned them about.
+        """
         if not self.editor.document().isModified():
             return True
         name = self.path.name if self.path else UNTITLED
-        return self._confirm(f"Discard the changes to {name}?")
-
-    def _confirm(self, question: str) -> bool:
-        """A yes or no the user answers; anything else counts as no."""
-        return (
-            QMessageBox.question(self, DISPLAY_NAME, question)
-            == QMessageBox.StandardButton.Yes
+        answer = QMessageBox.question(
+            self,
+            DISPLAY_NAME,
+            f"Save changes to {name}?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
         )
+        if answer == QMessageBox.StandardButton.Save:
+            # a save that was argued with, cancelled or refused keeps the work
+            # on screen, and the thing that was asked for does not happen
+            return self.save() is not None
+        return answer == QMessageBox.StandardButton.Discard
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
-        """Closing throws away unsaved work, so it is worth one more question."""
+        """Closing over work that was never written out is asked about first."""
         if self._ok_to_replace():
             event.accept()
         else:

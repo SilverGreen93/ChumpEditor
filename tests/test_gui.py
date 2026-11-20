@@ -71,8 +71,9 @@ def dialogs(monkeypatch):
 
     Automatic, because a message box is modal: one that nobody replaced would
     sit on screen and the test run would wait for it for ever.  The answer to a
-    question is yes, which is the answer that lets a test carry on and check
-    what happened after it.
+    question is to throw the work away, which is the answer that lets a test
+    carry on and check what happened after it; a test that wants the work kept
+    says so itself.
     """
     shown: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -92,7 +93,7 @@ def dialogs(monkeypatch):
         staticmethod(
             lambda parent, title, text, *a, **k: (
                 shown.append(("question", title, text)),
-                QMessageBox.StandardButton.Yes,
+                QMessageBox.StandardButton.Discard,
             )[1]
         ),
     )
@@ -713,9 +714,11 @@ def test_a_dialog_answered_with_nothing_leaves_the_window_alone(window, picks, t
 
 
 def test_opening_over_unsaved_work_is_asked_about(window, picks, monkeypatch, tmp_path):
+    """Cancel is the answer of someone who has changed their mind, and it stops
+    everything: no file dialog, no new file, the work still on screen."""
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a: QMessageBox.StandardButton.No),
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel),
     )
     keep = copy("config1.chump", tmp_path)
     away = copy("config2.chump", tmp_path)
@@ -726,6 +729,76 @@ def test_opening_over_unsaved_work_is_asked_about(window, picks, monkeypatch, tm
     click(window, "File", "Open file...")
     assert window.path == keep
     assert window.editor.toPlainText().startswith("x")
+    assert picks.asked == []  # it never got as far as asking which file
+
+
+def test_the_question_offers_to_save_the_work_not_only_to_lose_it(window, monkeypatch, tmp_path):
+    """Save, Discard and Cancel, with Save the button a pressing finger reaches."""
+    asked: list[tuple[str, str, int, int]] = []
+
+    def answer(parent, title, text, buttons=0, default=0, *a, **k):
+        asked.append((title, text, int(buttons), int(default)))
+        return QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(answer))
+    source = copy("config1.chump", tmp_path)
+    window.open_path(source)
+    window.editor.insertPlainText("x")
+
+    click(window, "File", "Open file...")
+
+    box = QMessageBox.StandardButton
+    title, text, buttons, default = asked[0]
+    assert (title, text) == (DISPLAY_NAME, "Save changes to config1.chump?")
+    assert buttons == int(box.Save | box.Discard | box.Cancel)
+    assert default == int(box.Save)
+
+
+def test_answering_save_writes_the_work_and_carries_on(window, monkeypatch, picks, tmp_path):
+    """The work goes to its own file, and then the file that was asked for opens."""
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
+    )
+    keep = copy("config1.chump", tmp_path)
+    away = copy("config2.chump", tmp_path)
+    window.open_path(keep)
+    replace(window, 'kind "interior"\nkuid <kuid:9:9>\n')
+
+    picks.choose.append(str(away))
+    click(window, "File", "Open file...")
+
+    assert load_chump(keep) == parse_text('kind "interior"\nkuid <kuid:9:9>\n')
+    assert window.path == away
+
+
+def test_answering_save_but_cancelling_the_name_keeps_the_work_on_screen(
+    window, monkeypatch, picks, tmp_path
+):
+    """Answering save is not the same as saving: the name still has to be given.
+
+    A text file being saved as a chump is asked where the new file goes; that
+    question answered with nothing means the work is still unsaved, so the open
+    that was asked for does not happen either.
+    """
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
+    )
+    keep = copy("config2.txt", tmp_path)
+    away = copy("config1.chump", tmp_path)
+    window.open_path(keep)
+    replace(window, 'kind "interior"\nkuid <kuid:9:9>\n')
+
+    picks.choose.append("")  # the save dialog, cancelled
+    picks.choose.append(str(away))
+    click(window, "File", "Open file...")
+
+    assert keep.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
+    assert window.path == keep
+    assert window.editor.toPlainText().startswith('kind "interior"')
+    assert window.editor.document().isModified()
+    assert [which for which, *_ in picks.asked] == ["save"]
 
 
 def test_saving_writes_the_file_being_edited_and_takes_the_star_off(window, tmp_path, dialogs):
@@ -849,9 +922,10 @@ def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path
 
 
 def test_closing_asks_before_losing_a_change(window, monkeypatch, tmp_path):
+    """Cancel keeps the window, the work and the file on disk exactly as they were."""
     monkeypatch.setattr(
         QMessageBox, "question",
-        staticmethod(lambda *a: QMessageBox.StandardButton.No),
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel),
     )
     source = copy("config1.chump", tmp_path)
     window.show()
@@ -869,9 +943,25 @@ def test_a_change_is_thrown_away_when_someone_says_so(window, tmp_path):
     window.open_path(source)
     replace(window, 'kind "interior"\n')
 
-    click(window, "File", "Exit")  # the standing answer in these tests is yes
+    click(window, "File", "Exit")  # the standing answer here is to throw the work away
     assert not window.isVisible()
     assert source.read_bytes() == (SAMPLES / "config1.chump").read_bytes()
+
+
+def test_answering_save_while_closing_writes_the_file_and_quits(window, monkeypatch, tmp_path):
+    """The work is asked about on the way out, and saving it ends the argument."""
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
+    )
+    source = copy("config1.chump", tmp_path)
+    window.show()
+    window.open_path(source)
+    replace(window, 'kind "interior"\nkuid <kuid:9:9>\n')
+
+    click(window, "File", "Exit")
+    assert not window.isVisible()
+    assert load_chump(source) == parse_text('kind "interior"\nkuid <kuid:9:9>\n')
 
 
 def test_closing_a_window_with_nothing_at_risk_asks_nothing(window, dialogs):
