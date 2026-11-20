@@ -189,10 +189,17 @@ class ChumpWindow(QMainWindow):
         """Tweaks > Remove language tags: description-de and the rest, gone."""
         self._tweak("Remove language tags", tweaks.remove_language_tags)
 
+    def convert_asset_filename_to_mesh_table(self) -> None:
+        """Tweaks > Convert asset-filename to mesh-table: the newer way to name a mesh."""
+        self._tweak(
+            "Convert asset-filename to mesh-table",
+            tweaks.convert_asset_filename_to_mesh_table,
+        )
+
     def _tweak(
         self,
         title: str,
-        tidy: Callable[[str], tweaks.Tweaks | tweaks.Sweep],
+        tidy: Callable[[str], tweaks.Tweaks | tweaks.Sweep | tweaks.MeshTables],
     ) -> None:
         """One tidy-up over the text on screen, and then an account of it.
 
@@ -200,12 +207,14 @@ class ChumpWindow(QMainWindow):
         document in, so the caret keeps its place and one Undo takes the whole
         of it back.  What was done, and what was deliberately left alone, is
         read out afterwards: a tidy-up nobody can see is a tidy-up nobody trusts.
+        A tidy-up that had to stop before it started is said as a warning.
         """
         result = tidy(self.editor.toPlainText())
         if result.rewrites:
             self.editor.apply_rewrites(result.rewrites)
         self.say(result.status)
-        QMessageBox.information(self, title, result.summary())
+        box = QMessageBox.warning if result.warning else QMessageBox.information
+        box(self, title, result.summary())
 
     def _write(self, form: WriteForm, ask: bool) -> Path | None:
         """Write out in one form, and make that the file being edited.

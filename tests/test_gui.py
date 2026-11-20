@@ -85,6 +85,10 @@ def dialogs(monkeypatch):
         staticmethod(lambda parent, title, text, *a, **k: shown.append(("info", title, text))),
     )
     monkeypatch.setattr(
+        QMessageBox, "warning",
+        staticmethod(lambda parent, title, text, *a, **k: shown.append(("warn", title, text))),
+    )
+    monkeypatch.setattr(
         QMessageBox, "about",
         staticmethod(lambda parent, title, text, *a, **k: shown.append(("about", title, text))),
     )
@@ -586,9 +590,10 @@ OBSOLETE = "".join(
 )
 
 
-def test_the_tweaks_menu_holds_both_tidy_ups(window):
+def test_the_tweaks_menu_holds_the_three_tidy_ups(window):
     assert labels(menu_of(window, "Tweaks")) == [
         "Convert obsolete lists",
+        "Convert asset-filename to mesh-table",
         "Remove language tags",
     ]
 
@@ -769,6 +774,116 @@ def test_the_obsolete_sample_loses_its_languages_in_the_window(window, dialogs, 
     assert names.count("description") == 1
     assert names.count("username") == 1
     assert "contact-email" in names
+
+
+MESHES = "".join(
+    line + "\n"
+    for line in (
+        lined("kind", '"vnd.trainsim.asset"'),
+        lined("asset-filename", '"MS_Shelter_4"'),
+        lined("username", '"MS_Shelter_4"'),
+    )
+)
+
+NEW_TABLE = (
+    "mesh-table\n"
+    "{\n"
+    "  default\n"
+    "  {\n"
+    '    mesh                                "MS_Shelter_4.im"\n'
+    "    auto-create                         1\n"
+    "  }\n"
+    "}\n"
+)
+
+
+def test_converting_an_asset_filename_writes_the_newer_kind_of_container(window, dialogs):
+    """The tag is gone and a default mesh took its place, on the same column."""
+    window.editor.setPlainText(MESHES)
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+
+    wanted = (
+        lined("kind", '"vnd.trainsim.asset"')
+        + "\n"
+        + NEW_TABLE
+        + lined("username", '"MS_Shelter_4"')
+        + "\n"
+    )
+    assert window.editor.toPlainText() == wanted
+
+
+def test_converting_an_asset_filename_says_which_mesh_it_named(window, dialogs):
+    window.editor.setPlainText(MESHES)
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("info", "Convert asset-filename to mesh-table")
+    assert "Added 1 mesh-table" in text
+    assert "asset-filename 'MS_Shelter_4' became mesh-table 'MS_Shelter_4.im'" in text
+    assert window._message == "Added 1 mesh-table"
+
+
+def test_one_press_of_undo_takes_the_whole_mesh_table_back(window, dialogs):
+    """Eight lines that went in together come back together."""
+    window.editor.setPlainText(MESHES)
+    before = window.editor.toPlainText()
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+    assert window.editor.toPlainText() != before
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == before
+    click(window, "Edit", "Redo")
+    assert "mesh-table" in window.editor.toPlainText()
+
+
+def test_a_file_that_already_has_a_mesh_table_is_warned_about(window, dialogs):
+    """Nothing is added, and the louder box says so: Trainz would have two meshes."""
+    window.editor.setPlainText(MESHES + NEW_TABLE)
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+
+    assert window.editor.toPlainText() == MESHES + NEW_TABLE
+    assert not window.editor.document().isModified()
+    assert not item(window, "Edit", "Undo").isEnabled()
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("warn", "Convert asset-filename to mesh-table")
+    assert text.startswith("Already has a mesh-table")
+    assert "default mesh" in text
+    assert window._message == "Already has a mesh-table"
+
+
+def test_a_mesh_table_written_by_the_tweak_itself_is_no_cause_for_worry(window, dialogs):
+    """Pressing the item twice is not a second conversion, and it is not a warning."""
+    window.editor.setPlainText(MESHES)
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+    once = window.editor.toPlainText()
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+
+    assert window.editor.toPlainText() == once
+    assert dialogs[-1][0] == "info"
+    assert dialogs[-1][2].startswith("Nothing was converted")
+    assert window._message == "Nothing was converted"
+
+
+def test_the_obsolete_sample_gains_its_mesh_table_in_the_window(window, dialogs, tmp_path):
+    """A real config file, converted and read back as a tree by the codec."""
+    source = copy("obsolete_config.txt", tmp_path)
+    assert window.open_file(source)
+    before = window.editor.toPlainText()
+
+    click(window, "Tweaks", "Convert asset-filename to mesh-table")
+
+    after = window.editor.toPlainText()
+    assert len(after.split("\n")) == len(before.split("\n")) + 7
+    assert '    mesh                                "casualwoman3.im"' in after
+    assert "asset-filename" not in after
+    assert dialogs[-1][2].startswith("Added 1 mesh-table")
+
+    tags = parse_text(after).tags
+    names = [tag.name for tag in tags]
+    assert names.count("mesh-table") == 1
+    table = next(tag for tag in tags if tag.name == "mesh-table")
+    assert [child.name for child in table.tags] == ["default"]
 
 
 # ---------------------------------------------------------------------------

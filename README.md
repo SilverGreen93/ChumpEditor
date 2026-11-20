@@ -97,8 +97,9 @@ looked like.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
   chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
-- **Tweaks**: Convert obsolete lists and Remove language tags - the tidy-ups of
-  the way older versions of Trainz wrote a file.
+- **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table and
+  Remove language tags - the tidy-ups of the way older versions of Trainz wrote
+  a file.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -144,6 +145,40 @@ Nothing is touched when a value holds a `;` itself, or when the file already has
 a tag of the plain name, or when another group of the same tags took that name
 first - those are listed as left alone, with the reason. A `load0` or `camera0`
 carries no dash, means something else entirely, and is never touched.
+
+#### Convert asset-filename to mesh-table
+
+An older asset says which mesh it loads with a single tag:
+
+```
+asset-filename                          "MS_Shelter_4"
+```
+
+and the newer kind says the same thing with a container:
+
+```
+mesh-table
+{
+  default
+  {
+    mesh                                "MS_Shelter_4.im"
+    auto-create                         1
+  }
+}
+```
+
+**Tweaks > Convert asset-filename to mesh-table** makes that change for every tag
+in the text on screen: the tag goes, the container comes in at the indent the tag
+stood at with its values on the same column as the rest of the file, and `.im`
+goes on the end of the name - which is what the tag left off, and what a name
+that already has it keeps once. The message afterwards names the mesh each new
+container loads, and one press of Undo takes the whole of it back.
+
+A file that already has a `mesh-table` is left exactly as it was, and the message
+is a warning rather than a note: two containers would leave Trainz choosing
+between two meshes. A tag that names no mesh - no value, empty quotes, a value
+that is not in quotes, one running over several lines, or the tag itself used as
+a container - is left where it is and listed with the reason.
 
 #### Remove language tags
 
@@ -240,7 +275,7 @@ src/chumpeditor/chump.py       the codec: parse/pack binary, parse/pack text, co
 src/chumpeditor/document.py    opening, saving, exporting: the rules the editor follows
 src/chumpeditor/theme.py       the colour themes: the JSON format, reading and writing one
 src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
-src/chumpeditor/tweaks.py      folding numbered tags into one list tag: Tweaks does this
+src/chumpeditor/tweaks.py      the three tidy-ups of the way older files read: Tweaks does this
 src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
@@ -248,7 +283,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         386 tests
+tests/                         409 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

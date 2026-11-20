@@ -47,6 +47,26 @@ an email is not written in the Ewe language.  Out goes the tag and its value and
 nothing in between, which for a container means its ``{`` and ``}`` and
 everything inside them, since that is the value.
 
+The third tidy-up moves an asset onto the newer way of naming its mesh.  Where
+the older kind has one tag::
+
+    asset-filename                          "MS_Shelter_4"
+
+the newer kind has a container, so the tag goes and this comes in its place, the
+name of the file to load carrying the ``.im`` the tag left off::
+
+    mesh-table
+    {
+      default
+      {
+        mesh                                "MS_Shelter_4.im"
+        auto-create                         1
+      }
+    }
+
+A file that already has a mesh-table is left exactly as it is and the person is
+warned, since a second one would leave Trainz choosing between two meshes.
+
 Everything here is free of Qt and answers in character positions within the
 text, so the rules can be read and tested without a window and the editor can
 apply the changes as edits a person can undo in one go.
@@ -57,12 +77,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .chump import VALUE_COLUMN
+
 __all__ = [
     "Conversion",
+    "MeshTable",
+    "MeshTables",
     "Removal",
     "Rewrite",
     "Sweep",
     "Tweaks",
+    "convert_asset_filename_to_mesh_table",
     "convert_obsolete_lists",
     "remove_language_tags",
 ]
@@ -161,6 +186,15 @@ class Tweaks:
         if not count:
             return "Nothing was converted"
         return f"Converted {count} obsolete {'tag' if count == 1 else 'tags'}"
+
+    @property
+    def warning(self) -> bool:
+        """Whether the window shows the answer as a warning rather than as news.
+
+        Anything the tweak looked at and turned down is worth the louder box: a
+        tag left the way it was may be one the person wants to fix by hand.
+        """
+        return bool(self.skipped)
 
 
 def convert_obsolete_lists(text: str) -> Tweaks:
@@ -446,6 +480,11 @@ class Sweep:
             return "No language tags"
         return f"Removed {count} language {'tag' if count == 1 else 'tags'}"
 
+    @property
+    def warning(self) -> bool:
+        """Whether the window shows the answer as a warning rather than as news."""
+        return bool(self.notes)
+
 
 @dataclass(frozen=True)
 class _Cut:
@@ -647,3 +686,241 @@ def _the_rest_of(stripped: str) -> str:
     """The text after a tag name, the way the codec separates the two."""
     parts = stripped.split(None, 1)
     return parts[1].strip() if len(parts) > 1 else ""
+
+
+@dataclass(frozen=True)
+class MeshTable:
+    """One ``mesh-table`` container the tweak put into the text.
+
+    ``source`` is the name as the asset-filename tag held it and ``mesh`` is the
+    file Trainz will load, ``.im`` on the end.  ``start`` and ``end`` are where
+    the tag it replaces stood, end before the line break after it.
+    """
+
+    #: the container's own level, which is always the default one
+    name: str
+    #: what the asset-filename tag said
+    source: str
+    #: the mesh file the container loads
+    mesh: str
+    start: int
+    end: int
+    #: the container that went in, exactly as the text now holds it
+    text: str
+
+    def __str__(self) -> str:
+        return f"asset-filename {self.source!r} became mesh-table {self.mesh!r}"
+
+    def __str__(self) -> str:
+        return f"asset-filename {self.source!r} became mesh-table {self.mesh!r}"
+
+
+@dataclass(frozen=True)
+class MeshTables:
+    """What converting the asset-filename tags did, and the text after it.
+
+    Shaped the way ``Tweaks`` and ``Sweep`` are - ``text``, ``rewrites``,
+    ``status`` and ``summary`` - so whoever applies one can apply the other
+    without asking.  ``blocked`` is why nothing was touched when the file already
+    has a mesh-table, and is empty when the tweak was free to work.
+    """
+
+    #: the whole text, with every container in it
+    text: str
+    #: the edits that turn the old text into the new one, in the order they
+    #: appear in the text, and never overlapping
+    rewrites: tuple[Rewrite, ...] = ()
+    #: the containers that went in, in the order they stand in the file
+    mesh_tables: tuple[MeshTable, ...] = ()
+    #: asset-filename tags that were seen and left where they are, and why
+    notes: tuple[str, ...] = ()
+    #: why the file was left alone altogether, or '' when it was not
+    blocked: str = ""
+
+    @property
+    def status(self) -> str:
+        """The same news in one line, for a status bar too narrow for the rest."""
+        if self.blocked:
+            return "Already has a mesh-table"
+        if self.mesh_tables:
+            return f"Added {_the_mesh_tables(len(self.mesh_tables))}"
+        return "Nothing was converted"
+
+    @property
+    def warning(self) -> bool:
+        """Whether the window shows the answer as a warning rather than as news.
+
+        A file that already loads its meshes is the loud case: the person asked
+        for a change that could not be made safely.
+        """
+        return bool(self.blocked)
+
+    def summary(self) -> str:
+        """What happened, in the words the window shows afterwards."""
+        if self.blocked:
+            return f"{self.status}: {self.blocked}"
+        parts: list[str] = []
+        if self.mesh_tables:
+            listed = "\n".join(f"  {item}" for item in self.mesh_tables)
+            parts.append(f"{self.status}:\n\n{listed}")
+        else:
+            parts.append(
+                "Nothing was converted.  An asset-filename tag is only changed "
+                "when it stands on a line of its own holding a mesh name in "
+                "quotes, and only where the file holds no mesh-table already."
+            )
+        for note in self.notes:
+            parts.append(f"Left alone: {note}.")
+        return "\n\n".join(parts)
+
+
+def _the_mesh_tables(how_many: int) -> str:
+    """The containers the tweak added, said the way the status line says them."""
+    return f"{how_many} mesh-table{'' if how_many == 1 else 's'}"
+
+
+# --------------------------------------------------------------------------- #
+# Convert asset-filename into mesh-table
+# --------------------------------------------------------------------------- #
+
+
+def convert_asset_filename_to_mesh_table(text: str) -> MeshTables:
+    """Replace every ``asset-filename`` tag with a ``mesh-table`` container.
+
+    The container goes where the tag stood, at the same indent, and holds the
+    name from the tag with ``.im`` on the end as the default mesh.  A file that
+    already has a mesh-table is not touched at all and the person is told why,
+    because a second container would leave Trainz picking between two meshes; a
+    tag that does not name a file simply gets a note and stays as it is.
+    """
+    lines, eol = _split(text)
+    tags = _the_lines_holding(lines, "asset-filename")
+    # a file with no tag to convert has nothing to be done to it, mesh-table or
+    # not, so the one worth complaining about is the file that wanted converting
+    already = _a_mesh_table_is_already_there(lines) if tags else ""
+    if already:
+        # the file already says which mesh to load; a second container would
+        # only give Trainz two answers to choose between
+        return MeshTables(text=text, blocked=already)
+
+    rewrites: list[Rewrite] = []
+    tables: list[MeshTable] = []
+    notes: list[str] = []
+    for at in tags:
+        rest = _the_rest_of(lines[at].strip())
+        fault = _the_mesh_name_is_missing(rest, lines, at)
+        if fault:
+            notes.append(f"the asset-filename on line {at + 1} {fault}")
+            continue
+        given = rest[1:-1].strip()
+        mesh = _with_an_im_on_the_end(given)
+        start, end = _start_of(lines, eol, at), _end_of(lines, eol, at)
+        block = _the_mesh_table(_the_indent(lines[at]), mesh, eol)
+        # the tag's own line is what is replaced, so the break after it stays
+        rewrites.append(Rewrite(start=start, end=end, text=block))
+        tables.append(
+            MeshTable(name="default", source=given, mesh=mesh, start=start, end=end, text=block)
+        )
+
+    return MeshTables(
+        text=_apply(text, rewrites),
+        rewrites=tuple(rewrites),
+        mesh_tables=tuple(tables),
+        notes=tuple(notes),
+    )
+
+
+def _a_mesh_table_is_already_there(lines: list[str]) -> str:
+    """Whether the file already loads its meshes, and how - '' when it does not.
+
+    One mesh-table anywhere is enough to stop, since a second would leave two
+    containers answering the same question.  Whether a default mesh was found
+    inside decides the wording, because a mesh-table holding one is the case the
+    person asked to be told about.
+    """
+    tables = _the_lines_holding(lines, "mesh-table")
+    if not tables:
+        return ""
+    for at in tables:
+        # the container's own body, which is where a default would be found
+        last, _ = _the_tag_takes_up_to(lines, at, _the_rest_of(lines[at].strip()))
+        if _the_lines_holding(lines[at + 1 : last + 1], "default"):
+            return "a mesh-table with a default mesh is in the file"
+    return "a mesh-table is in the file"
+
+
+def _the_mesh_name_is_missing(rest: str, lines: list[str], at: int) -> str:
+    """Why a tag line does not name a mesh file, or '' when it names one.
+
+    A name has to be one stretch of text in quotes on the tag's own line.  A
+    container, an empty value, a number or a kuid, and a value running over
+    several lines are all shapes an asset-filename tag has been seen in, and none
+    of them says which mesh to load.
+    """
+    if rest == "{" or (not rest and _a_brace_is_next(lines, at + 1)):
+        return "is a container rather than a name"
+    if not rest:
+        return "has no value"
+    if not rest.startswith('"'):
+        return f"holds {rest!r} rather than a name in quotes"
+    if not (len(rest) > 1 and rest.endswith('"')):
+        return "has a value running over several lines"
+    if not rest[1:-1].strip():
+        return "has empty quotes where the mesh name should be"
+    return ""
+
+
+def _the_lines_holding(lines: list[str], name: str) -> list[int]:
+    """The lines where a tag of this name starts, in the order they appear.
+
+    Only the lines the codec reads as tag lines count: a line inside a value
+    running over several lines is somebody's prose, not a tag.
+    """
+    found: list[int] = []
+    running = False
+    for at, line in enumerate(lines):
+        if running:
+            running = not line.endswith('"')
+            continue
+        tag = _A_NAME.match(line)
+        if tag and tag.group(1).lower() == name:
+            found.append(at)
+        running = _opens_a_running_value(line)
+    return found
+
+
+def _with_an_im_on_the_end(name: str) -> str:
+    """The mesh name with its ``.im`` on the end, unless it already has one."""
+    return name if name.lower().endswith(".im") else f"{name}.im"
+
+
+def _the_mesh_table(indent: str, mesh: str, eol: str) -> str:
+    """The container the newer kind of asset writes in place of the tag.
+
+    Written the way the codec writes a container: the name alone on its line, the
+    ``{`` on the line below, two spaces deeper at each level, and the values
+    starting on the same column they do everywhere else in the file.
+    """
+    inner, outer = indent + "  ", indent + "    "
+    return eol.join(
+        [
+            indent + "mesh-table",
+            indent + "{",
+            inner + "default",
+            inner + "{",
+            outer + "mesh" + " " * _the_gap(outer, "mesh") + f'"{mesh}"',
+            outer + "auto-create" + " " * _the_gap(outer, "auto-create") + "1",
+            inner + "}",
+            indent + "}",
+        ]
+    )
+
+
+def _the_gap(indent: str, name: str) -> int:
+    """The spaces that put a value on VALUE_COLUMN, two at the closest."""
+    return max(VALUE_COLUMN - len(indent) - len(name), 2)
+
+
+def _the_indent(line: str) -> str:
+    """Whatever a line starts with before its tag name."""
+    return line[: len(line) - len(line.lstrip())]

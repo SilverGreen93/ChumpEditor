@@ -377,7 +377,8 @@
         "car18",
         "car19",
         "car20",
-        "rem"
+        "rem",
+        "night"
       ],
       "patterns": [
         "category-(era|region)-[0-9]+",

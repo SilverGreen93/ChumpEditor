@@ -1,4 +1,5 @@
-"""Tests for the two Tweaks: numbered tags folded into one, and language tags.
+"""Tests for the Tweaks: numbered tags folded into one, language tags out, and
+an asset-filename tag turned into a mesh-table container.
 
 Nothing here needs a window.  The rules, the edits and the words about them are
 all decided in ``tweaks.py``; ``gui.editor`` only carries the edits out.
@@ -32,6 +33,16 @@ def cleared(text: str) -> str:
 def told(text: str) -> str:
     """Everything the sweep had to say, in one string to search."""
     return tweaks.remove_language_tags(text).summary()
+
+
+def meshed(text: str) -> str:
+    """The text a mesh-table conversion produces."""
+    return tweaks.convert_asset_filename_to_mesh_table(text).text
+
+
+def mesh_said(text: str) -> str:
+    """Everything the mesh-table conversion had to say, in one string to search."""
+    return tweaks.convert_asset_filename_to_mesh_table(text).summary()
 
 
 # ---------------------------------------------------------------------------
@@ -528,4 +539,249 @@ def test_the_language_tags_of_a_real_asset():
     assert after.get("contact-email").value == before.get("contact-email").value
     assert after.get("description").value == before.get("description").value
     assert after.get("license").value == before.get("license").value
+    assert after.get("kuid-table").tags == before.get("kuid-table").tags
+
+
+# ---------------------------------------------------------------------------
+# the mesh-table container
+# ---------------------------------------------------------------------------
+TABLE = (
+    "mesh-table\n"
+    "{\n"
+    "  default\n"
+    "  {\n"
+    # the value starts on column 40, as it does everywhere else in a config file
+    f'    {"mesh":<36}"MS_Shelter_4.im"\n'
+    f'    {"auto-create":<36}1\n'
+    "  }\n"
+    "}\n"
+)
+
+
+def test_an_asset_filename_tag_becomes_a_container_holding_its_mesh():
+    assert meshed('asset-filename "MS_Shelter_4"\n') == TABLE
+
+
+def test_the_mesh_name_keeps_an_extension_it_already_had():
+    result = tweaks.convert_asset_filename_to_mesh_table('asset-filename "MS_Shelter_4.im"\n')
+    assert result.mesh_tables[0].mesh == "MS_Shelter_4.im"
+    assert 'mesh                                "MS_Shelter_4.im"' in result.text
+    assert ".im.im" not in result.text
+
+
+def test_the_container_stands_where_the_tag_stood_and_at_the_same_indent():
+    text = 'buildable\n{\n  asset-filename                        "MS_Shelter_4"\n}\n'
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+    assert result.text == (
+        "buildable\n"
+        "{\n"
+        "  mesh-table\n"
+        "  {\n"
+        "    default\n"
+        "    {\n"
+        f'      {"mesh":<34}"MS_Shelter_4.im"\n'
+        f'      {"auto-create":<34}1\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_the_values_stand_on_the_same_column_as_the_rest_of_the_file():
+    """The new lines are laid out the way every other value in the file is."""
+    lines = meshed('asset-filename "MS_Shelter_4"\n').split("\n")
+    assert lines[4][40] == '"'
+    assert lines[5][40] == "1"
+
+
+def test_every_asset_filename_in_the_file_is_converted():
+    text = (
+        'asset-filename "MS_Shelter_4"\n'
+        "kind\n"
+        "{\n"
+        '  asset-filename "MS_Shelter_5"\n'
+        "}\n"
+    )
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+    assert len(result.mesh_tables) == 2
+    assert result.text.count("mesh-table") == 2
+    assert "asset-filename" not in result.text
+
+
+def test_the_rest_of_the_file_is_left_exactly_as_it_was():
+    text = (
+        "kind\n"
+        '{\n'
+        '  name "shelter"\n'
+        "}\n"
+        'asset-filename "MS_Shelter_4"\n'
+        "kuid-table\n"
+        "{\n"
+        "  kuid                <kuid:123:456>\n"
+        "}\n"
+    )
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+    assert result.text.startswith(text[: text.index("asset-filename")])
+    assert result.text.endswith(text[text.index("kuid-table"):])
+
+
+def test_a_file_that_has_a_mesh_table_is_not_touched_at_all():
+    text = 'asset-filename "MS_Shelter_4"\n\nmesh-table\n{\n  default\n  {\n    mesh "a.im"\n  }\n}\n'
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.status == "Already has a mesh-table"
+    assert result.warning
+    assert result.summary() == (
+        "Already has a mesh-table: a mesh-table with a default mesh is in the file"
+    )
+
+
+def test_a_mesh_table_holding_nothing_still_stops_the_change():
+    """Two containers would leave Trainz picking, default mesh or no default."""
+    text = 'asset-filename "MS_Shelter_4"\n\nmesh-table\n{\n}\n'
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert result.text == text
+    assert result.blocked == "a mesh-table is in the file"
+    assert result.summary() == "Already has a mesh-table: a mesh-table is in the file"
+
+
+def test_a_mesh_table_found_anywhere_in_the_file_stops_the_change():
+    text = (
+        "textures\n"
+        "{\n"
+        "  mesh-table\n"
+        "  {\n"
+        "    default\n"
+        "    {\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'asset-filename "MS_Shelter_4"\n'
+    )
+    assert tweaks.convert_asset_filename_to_mesh_table(text).blocked == (
+        "a mesh-table with a default mesh is in the file"
+    )
+
+
+def test_the_words_mesh_table_inside_a_value_are_not_a_container():
+    text = (
+        "license\n"
+        '"Nobody may use this file with a mesh-table of their own,\n'
+        'not even one holding a default mesh"\n'
+        'asset-filename "MS_Shelter_4"\n'
+    )
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert result.blocked == ""
+    assert len(result.mesh_tables) == 1
+
+
+def test_an_asset_filename_that_names_no_mesh_is_left_alone():
+    text = (
+        "asset-filename\n"
+        'asset-filename ""\n'
+        "asset-filename MS_Shelter_4\n"
+        'asset-filename "MS_Shelter_4\n'
+        "more lines\"\n"
+        "asset-filename\n"
+        "{\n"
+        "}\n"
+    )
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert result.text == text
+    assert result.mesh_tables == ()
+    assert result.notes == (
+        "the asset-filename on line 1 has no value",
+        "the asset-filename on line 2 has empty quotes where the mesh name should be",
+        "the asset-filename on line 3 holds 'MS_Shelter_4' rather than a name in quotes",
+        "the asset-filename on line 4 has a value running over several lines",
+        "the asset-filename on line 6 is a container rather than a name",
+    )
+    assert result.status == "Nothing was converted"
+    assert not result.warning
+    assert "Left alone: the asset-filename on line 1 has no value." in result.summary()
+
+
+def test_the_summary_names_the_mesh_that_went_into_the_container():
+    assert tweaks.convert_asset_filename_to_mesh_table('asset-filename "MS_Shelter_4"\n').summary() == (
+        "Added 1 mesh-table:\n"
+        "\n"
+        "  asset-filename 'MS_Shelter_4' became mesh-table 'MS_Shelter_4.im'"
+    )
+
+
+def test_the_summary_of_a_file_with_no_asset_filename_says_so():
+    result = tweaks.convert_asset_filename_to_mesh_table('kind "interior"\nusername "a"\n')
+    assert result.status == "Nothing was converted"
+    assert result.rewrites == ()
+    assert result.summary().startswith("Nothing was converted")
+
+
+def test_the_rewrite_covers_the_tag_and_not_the_break_after_it():
+    text = 'kind "interior"\nasset-filename "MS_Shelter_4"\nauthor "nobody"\n'
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert [text[one.start : one.end] for one in result.rewrites] == ['asset-filename "MS_Shelter_4"']
+    assert result.text == (
+        'kind "interior"\n' + result.rewrites[0].text + '\nauthor "nobody"\n'
+    )
+
+
+def test_a_conversion_records_the_container_it_wrote():
+    result = tweaks.convert_asset_filename_to_mesh_table('asset-filename "MS_Shelter_4"\n')
+    table = result.mesh_tables[0]
+    assert (table.name, table.source, table.mesh) == ("default", "MS_Shelter_4", "MS_Shelter_4.im")
+    assert table.text + "\n" == TABLE
+    assert (table.start, table.end) == (0, len('asset-filename "MS_Shelter_4"'))
+
+
+def test_a_text_file_written_with_crlf_comes_back_with_crlf():
+    result = tweaks.convert_asset_filename_to_mesh_table('asset-filename "MS_Shelter_4"\r\n')
+    assert result.text == TABLE.replace("\n", "\r\n")
+
+
+def test_the_conversion_leaves_nothing_for_a_second_conversion_to_do():
+    """And the container it wrote itself is no reason to warn anybody."""
+    text = read_text_file(SAMPLES / "obsolete_config.txt")
+    once = tweaks.convert_asset_filename_to_mesh_table(text)
+    twice = tweaks.convert_asset_filename_to_mesh_table(once.text)
+
+    assert twice.text == once.text
+    assert twice.status == "Nothing was converted"
+    assert twice.blocked == ""
+    assert not twice.warning
+
+
+def test_the_asset_filename_of_a_real_asset():
+    """A config file that named its mesh with a tag, and now names it the new way."""
+    text = read_text_file(SAMPLES / "obsolete_config.txt")
+    result = tweaks.convert_asset_filename_to_mesh_table(text)
+
+    assert result.status == "Added 1 mesh-table"
+    assert result.notes == ()
+    assert not result.warning
+    assert result.mesh_tables[0].mesh == "casualwoman3.im"
+
+    lines_before = text.split("\r\n")
+    lines_after = result.text.split("\r\n")
+    assert len(lines_after) == len(lines_before) + 7
+    assert '    mesh                                "casualwoman3.im"' in result.text
+    assert '    auto-create                         1' in result.text
+    assert "asset-filename" not in result.text
+
+    before, after = parse_text(text), parse_text(result.text)
+    assert [tag.name for tag in after.tags] == [
+        "mesh-table" if tag.name == "asset-filename" else tag.name for tag in before.tags
+    ]
+    table = after.get("mesh-table")
+    assert [child.name for child in table.tags] == ["default"]
+    default = table.get("default")
+    assert [leaf.name for leaf in default.tags] == ["mesh", "auto-create"]
+    assert default.get("mesh").value == "casualwoman3.im"
+    assert default.get("auto-create").value == 1
+    assert after.get("username").value == before.get("username").value
     assert after.get("kuid-table").tags == before.get("kuid-table").tags

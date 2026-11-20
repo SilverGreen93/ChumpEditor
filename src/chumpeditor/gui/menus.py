@@ -78,6 +78,12 @@ def _tweaks(menu, window: QMainWindow) -> None:
     asset's tags is not a change to discover later.
     """
     _add(menu, "&Convert obsolete lists", None, window.convert_obsolete_lists)
+    _add(
+        menu,
+        "Convert asset-&filename to mesh-table",
+        None,
+        window.convert_asset_filename_to_mesh_table,
+    )
     _add(menu, "&Remove language tags", None, window.remove_language_tags)
 
 
