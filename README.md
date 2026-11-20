@@ -73,27 +73,75 @@ writes binary.
 
 ## GUI
 
-The main area is one rich text editor: the text form of a file, in a fixed
-width font, colours and attributes (bold, italic) living in the document.
+The main area is one rich text editor: the text form of a file in a fixed width
+font, coloured by keyword. The colours are paint rather than content - undo only
+ever goes back over the text, and what is saved is plain text whatever a line
+looked like.
 
-- Name a `.chump`, `.cdp` or `.txt` on the command line and it opens straight
-  in the editor; a binary chump is expanded for display and nothing is written
-  until you save.
+- Name a `.chump`, `.cdp` or `.txt` on the command line, or drop one anywhere on
+  the window (including onto the text), and it opens straight in the editor; a
+  binary chump is expanded for display and nothing is written until you save.
 - The title carries the file's name and a `*` while it has changes that are
   not on disk.
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
+- **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
+  chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
+- **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
+- **Help**: About - what the program does, the version, the copyright and a link
+  to this repository.
+
+### Colour themes
+
+What gets coloured is a small JSON file, not something written into the program:
+
+```json
+{
+  "name": "Trainz config",
+  "caseSensitive": true,
+  "styles": {
+    "default":     "#000000",
+    "keywords1":   {"colour": "#0000ff"},
+    "keywords3":   {"colour": "#ff0000", "italic": true},
+    "delimiters1": "#008000"
+  },
+  "pairs":    [{"style": "delimiters1", "open": "\"", "close": "\""}],
+  "keywords": [{"style": "keywords1", "words": ["kind", "kuid"]}],
+  "numbers":  null
+}
+```
+
+Add a word to a list or change a colour and the next line is coloured by it. A
+pair with an empty `close` colours the rest of the line it starts on, a pair left
+open at the end of a line carries on into the next one, and inside a pair the
+pair's own colour wins over any keyword.
+
+To use your own copy rather than editing the program's files, put a
+`trainz.json` here:
+
+```
+%LOCALAPPDATA%\ChumpEditor\themes\    (Windows)
+~/.config/ChumpEditor/themes/         (elsewhere)
+```
+
+That one wins over the shipped one, and nothing is created there until you write
+it.
 
 ## Project layout
 
 ```
 src/chumpeditor/chump.py       the codec: parse/pack binary, parse/pack text, convert_file
 src/chumpeditor/document.py    opening, saving, exporting: the rules the editor follows
+src/chumpeditor/theme.py       the colour themes: the JSON format, reading and writing one
+src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
+src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/cli.py         command line
-src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, resources.py
+src/chumpeditor/themes/        the theme that ships (trainz.json)
+src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, about.py,
+                               highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         196 tests
+tests/                         307 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

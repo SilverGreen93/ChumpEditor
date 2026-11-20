@@ -40,6 +40,7 @@ VERSION = "2.0"
 SUMMARY = "Trainz .chump to text converter (GUI + CLI)"
 ICON_ICO = ROOT / "assets" / "chumpeditor.ico"
 ICON_PNG = ROOT / "assets" / "chumpeditor.png"  # for the .desktop entry / dmg (optional)
+THEMES = ROOT / "src" / PACKAGE / "themes"  # the colour themes the editor ships
 GUI_ENTRY = ROOT / "chumpeditor_gui_entry.py"
 CLI_ENTRY = ROOT / "chumpeditor_cli_entry.py"
 DIST = ROOT / "dist"
@@ -80,16 +81,20 @@ def hidden_imports() -> list[str]:
 
 
 def bundled_assets() -> list[str]:
-    """Ship the icon inside the bundle so the GUI can set its window icon.
+    """Ship the icon and the themes inside the bundle.
 
     --icon only stamps the exe file itself; the running window (titlebar and
     taskbar) reads the .ico through gui._resource_path(), which looks inside
     sys._MEIPASS, so the file has to be bundled as data as well.
+
+    The themes are read by theme.bundled_theme_path(), which looks next to
+    theme.py, so inside the bundle they go back under chumpeditor/themes.
     """
     flags: list[str] = []
-    for asset in (ICON_ICO,):
-        if asset.is_file():
-            flags += ["--add-data", f"{asset}{os.pathsep}."]
+    if ICON_ICO.is_file():
+        flags += ["--add-data", f"{ICON_ICO}{os.pathsep}."]
+    if THEMES.is_dir():
+        flags += ["--add-data", f"{THEMES}{os.pathsep}{PACKAGE}/themes"]
     return flags
 
 

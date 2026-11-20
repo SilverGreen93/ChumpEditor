@@ -1,8 +1,10 @@
 """The text area the window is built around.
 
-One rich text document, not a queue of files.  Rich text because the colouring
-of step 4 - and any hand-made bold, italic or colour - lives in the document
-itself, which a plain text edit could not hold.  Everything about the file the
+One rich text document, not a queue of files.  Rich text because a hand-made
+bold, italic or colour, and anything pasted in carrying them, has to survive -
+a plain text edit could not hold any of that.  The keyword colours themselves
+are paint laid over the text from a theme file by ``gui.highlighter``, so
+nothing about them is written in here either; everything about the file the
 text came from is the window's business, not this widget's.
 """
 
@@ -12,7 +14,9 @@ from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import QTextEdit
 
+from ..theme import Theme, default_theme
 from .drops import accept_file_drop, dropped_paths
+from .highlighter import ThemeHighlighter
 
 __all__ = ["RichTextEditor", "code_font"]
 
@@ -49,13 +53,18 @@ class RichTextEditor(QTextEdit):
     #: a file drag is over the text (True) or has left it (False)
     files_dragging = pyqtSignal(bool)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, theme: Theme | None = None) -> None:
         super().__init__(parent)
         self.setAcceptRichText(True)  # colours and attributes stay in the document
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(code_font())
         self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
         self.setAcceptDrops(True)  # a file lands here as often as on the frame
+        self.highlighter = ThemeHighlighter(self.document(), theme or default_theme())
+
+    def set_theme(self, theme: Theme) -> None:
+        """Change the colours, and put the new ones over the text."""
+        self.highlighter.set_theme(theme)
 
     def set_line_wrap(self, wrap: bool) -> None:
         """Wrapped for reading, straight for keeping the columns honest."""

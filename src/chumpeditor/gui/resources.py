@@ -13,6 +13,7 @@ from pathlib import Path
 from PyQt6.QtGui import QIcon
 
 from .. import __version__
+from ..paths import APP_NAME
 
 __all__ = [
     "APP_NAME",
@@ -29,7 +30,6 @@ __all__ = [
     "window_icon",
 ]
 
-APP_NAME = "ChumpEditor"
 HOME_URL = "https://github.com/SilverGreen93/ChumpEditor"
 ISSUES_URL = f"{HOME_URL}/issues"
 
