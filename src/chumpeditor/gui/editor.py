@@ -5,16 +5,22 @@ bold, italic or colour, and anything pasted in carrying them, has to survive -
 a plain text edit could not hold any of that.  The keyword colours themselves
 are paint laid over the text from a theme file by ``gui.highlighter``, so
 nothing about them is written in here either; everything about the file the
-text came from is the window's business, not this widget's.
+text came from is the window's business, not this widget's.  When the window
+asks for a change to the text it is made here, in place and in one undo step,
+because this is the only place the document can be edited without losing where
+the caret was.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from PyQt6.QtCore import QEvent, pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase, QPalette
+from PyQt6.QtGui import QFont, QFontDatabase, QPalette, QTextCursor
 from PyQt6.QtWidgets import QTextEdit
 
 from ..theme import Theme, default_theme
+from ..tweaks import Rewrite
 from .drops import accept_file_drop, dropped_paths
 from .highlighter import ThemeHighlighter
 
@@ -95,6 +101,23 @@ class RichTextEditor(QTextEdit):
         self.setLineWrapMode(
             QTextEdit.LineWrapMode.WidgetWidth if wrap else QTextEdit.LineWrapMode.NoWrap
         )
+
+    def apply_rewrites(self, rewrites: Iterable[Rewrite]) -> None:
+        """Cut out stretches of the text and write their replacements in.
+
+        The positions are the ones counted through ``toPlainText()``, and the
+        document counts its characters the same way, so a change worked out from
+        the text lands where it was worked out to land.  The last stretch is cut
+        out first so the earlier ones keep their places, and the lot of them make
+        one edit block: one press of Undo puts the whole change back.
+        """
+        cursor = self.textCursor()
+        cursor.beginEditBlock()
+        for rewrite in sorted(rewrites, key=lambda item: item.start, reverse=True):
+            cursor.setPosition(rewrite.start)
+            cursor.setPosition(rewrite.end, QTextCursor.MoveMode.KeepAnchor)
+            cursor.insertText(rewrite.text)
+        cursor.endEditBlock()
 
     # -- drag and drop ------------------------------------------------------
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming

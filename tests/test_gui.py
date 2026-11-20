@@ -483,9 +483,9 @@ def keys(window, menu_name: str, label: str) -> str:
     return item(window, menu_name, label).shortcut().toString()
 
 
-def test_the_menu_bar_offers_file_edit_and_help(window):
+def test_the_menu_bar_offers_file_edit_tweaks_and_help(window):
     assert [plain(action.text()) for action in window.menuBar().actions()] == [
-        "File", "Edit", "Help"
+        "File", "Edit", "Tweaks", "Help"
     ]
 
 
@@ -563,6 +563,124 @@ def test_the_about_box_names_the_program_the_address_and_the_version(window, dia
     for part in (APP_TITLE, __version__, SUMMARY, DESCRIPTION, CREDIT, HOME_URL):
         assert part in text
     assert f'href="{HOME_URL}"' in text  # the address is a link, not a caption
+
+
+# ---------------------------------------------------------------------------
+# the Tweaks menu
+# ---------------------------------------------------------------------------
+def lined(tag: str, value: str) -> str:
+    """A tag line with its value on column 40, the way a config file writes."""
+    return f"{tag:<40}{value}"
+
+
+OBSOLETE = "".join(
+    line + "\n"
+    for line in (
+        lined("kind", '"interior"'),
+        lined("category-era-0", '"1920s"'),
+        lined("category-era-1", '"1930s"'),
+        lined("category-era-2", '"1940s"'),
+        lined("category-region-0", '"RO"'),
+    )
+)
+
+
+def test_the_tweaks_menu_holds_the_conversions(window):
+    assert labels(menu_of(window, "Tweaks")) == ["Convert obsolete lists"]
+
+
+def test_converting_folds_the_tags_into_one_line(window, dialogs):
+    window.editor.setPlainText(OBSOLETE)
+    click(window, "Tweaks", "Convert obsolete lists")
+    assert window.editor.toPlainText() == "".join(
+        line + "\n"
+        for line in (
+            lined("kind", '"interior"'),
+            lined("category-era", '"1920s;1930s;1940s"'),
+            lined("category-region-0", '"RO"'),
+        )
+    )
+
+
+def test_converting_tells_the_user_what_it_did(window, dialogs):
+    """The tags that were folded up are named, in a box and in the status bar."""
+    window.editor.setPlainText(OBSOLETE)
+    click(window, "Tweaks", "Convert obsolete lists")
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("info", "Convert obsolete lists")
+    assert "Converted 1 obsolete list" in text
+    for tag in ("category-era-0", "category-era-2", "category-era"):
+        assert tag in text
+    assert "category-region-0" not in text  # one tag on its own is not a list
+    assert window._message == "Converted 1 obsolete list"
+
+
+def test_one_press_of_undo_takes_the_whole_conversion_back(window, dialogs):
+    """Every list that was folded up goes back at once, not one press each."""
+    cars = lined("car-0", '"a"') + "\n" + lined("car-1", '"b"') + "\n"
+    window.editor.setPlainText(OBSOLETE + cars)
+    before = window.editor.toPlainText()
+    click(window, "Tweaks", "Convert obsolete lists")
+    assert window.editor.toPlainText() != before
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == before
+    click(window, "Edit", "Redo")
+    assert lined("car", '"a;b"') in window.editor.toPlainText()
+
+
+def test_converting_leaves_the_document_dirty_and_the_title_marked(window, dialogs):
+    window.editor.setPlainText(OBSOLETE)
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Convert obsolete lists")
+    assert window.editor.document().isModified()
+    assert window.windowTitle().startswith("Untitled *")
+
+
+def test_a_file_with_nothing_to_convert_is_left_alone(window, dialogs):
+    window.editor.setPlainText('kind "interior"\nkuid <kuid:1:2>\n')
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Convert obsolete lists")
+
+    assert window.editor.toPlainText() == 'kind "interior"\nkuid <kuid:1:2>\n'
+    assert not window.editor.document().isModified()
+    assert not item(window, "Edit", "Undo").isEnabled()
+    assert dialogs[-1][2].startswith("Nothing was converted")
+    assert window._message == "Nothing was converted"
+
+
+def test_a_conversion_the_rules_turn_down_is_said_out_loud(window, dialogs):
+    """Repeating a tag the file already has would break it, and the user hears why."""
+    window.editor.setPlainText(
+        lined("category-era", '"1900s"') + "\n"
+        + lined("category-era-0", '"a"') + "\n"
+        + lined("category-era-1", '"b"') + "\n"
+    )
+    click(window, "Tweaks", "Convert obsolete lists")
+
+    assert "would repeat category-era" in dialogs[-1][2]
+    assert window._message == "Nothing was converted"
+
+
+def test_the_obsolete_sample_converts_in_the_window_and_still_reads(window, dialogs, tmp_path):
+    """The config file this was asked for, opened from disk and read back."""
+    source = copy("obsolete_config.txt", tmp_path)
+    assert window.open_file(source)
+    before = window.editor.toPlainText()
+
+    click(window, "Tweaks", "Convert obsolete lists")
+
+    after = window.editor.toPlainText()
+    eras = '"1920s;1930s;1940s;1950s;1960s;1970s;1980s;1990s;2000s"'
+    assert lined("category-era", eras) in after
+    assert lined("category-region-0", '"SE"') in after
+    assert len(after.split("\n")) == len(before.split("\n")) - 8
+    assert "Left alone" not in dialogs[-1][2]
+
+    names = [tag.name for tag in parse_text(after).tags]
+    assert names.count("category-era") == 1
+    assert "category-era-0" not in names
+    assert "category-region-0" in names
 
 
 # ---------------------------------------------------------------------------

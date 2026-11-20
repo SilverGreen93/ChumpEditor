@@ -1,0 +1,53 @@
+﻿
+kind                                    "scenery"
+kuid                                    <kuid2:66277:35027:1>
+region                                  "Third_Party_UK"
+type                                    "People"
+name                                    "casualwoman3"
+description                             "casualwoman3"
+trainz-build                            1.5
+height-range                            0,3
+rotate-yz-range                         -180,180
+category-class                          "BR"
+category-region-0                       "SE"
+category-era-0                          "1920s"
+category-era-1                          "1930s"
+category-era-2                          "1940s"
+category-era-3                          "1950s"
+category-era-4                          "1960s"
+category-era-5                          "1970s"
+category-era-6                          "1980s"
+category-era-7                          "1990s"
+category-era-8                          "2000s"
+asset-filename                          "casualwoman3"
+username                                "casualwoman3"
+author                                  "Brian Round"
+organisation                            
+contact-email                           "bkr6767@aol.com"
+contact-website                         
+license                                 "
+"
+description-de                          "Freizeit-Frau3"
+description-pl                          "kobieta3"
+username-cn                             "女臨時工3"
+description-cn                          "女臨時工3"
+description-fr                          "passante3"
+username-nl                             "casualwoman3"
+description-nl                          "casualwoman3"
+description-es                          "obrera3"
+description-ru                          "Прохожая3"
+description-it                          "Donna qualunque 3"
+username-hu                             "casualwoman3"
+description-hu                          "casualwoman3"
+username-cz                             "žena3"
+description-cz                          "žena3"
+username-jp                             "普段着の女性3"
+username-it                             "donna casuale3"
+username-es                             "mujerinformal3"
+username-pl                             "zwykłakobieta3"
+username-de                             "casualwoman3"
+username-fr                             "femmedécontractée3"
+
+kuid-table
+{
+}

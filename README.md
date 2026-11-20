@@ -1,4 +1,4 @@
-# ChumpEditor
+# Chump Editor
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SilverGreen93/ChumpEditor)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) [![Downloads (Latest Release)](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/latest/total?label=latest%20release%20downloads)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/total?label=total%20downloads)
 
@@ -88,8 +88,39 @@ looked like.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
   chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
+- **Tweaks**: Convert obsolete lists - folding up the numbered tags older
+  versions of Trainz wrote.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
+
+### Convert obsolete lists
+
+Older assets write a list as a run of numbered tags:
+
+```
+category-era-0                        "1920s"
+category-era-1                        "1930s"
+category-era-2                        "1940s"
+```
+
+and the same list now reads as one tag with the elements between semicolons:
+
+```
+category-era                          "1920s;1930s;1940s"
+```
+
+**Tweaks > Convert obsolete lists** makes that change for every group in the text
+on screen, keeps the values in the order the numbers say and the columns where
+they stood, and ends with a message naming every group it folded up and every one
+it left alone. One press of Undo takes the whole change back.
+
+A group is folded up only when the rules are sure of it: two or more tags with
+`-number` on the end standing on neighbouring lines at the same indent, each
+holding a quoted value on its own line, none of the values holding a `;`, and
+nothing else in the file already answering to the plain name. A lone
+`category-region-0`, a `load0` or `camera0`, a value running over several lines
+and a name already in use are all left exactly as they were, and named in the
+message as something left alone.
 
 ### Colour themes
 
@@ -162,6 +193,7 @@ src/chumpeditor/chump.py       the codec: parse/pack binary, parse/pack text, co
 src/chumpeditor/document.py    opening, saving, exporting: the rules the editor follows
 src/chumpeditor/theme.py       the colour themes: the JSON format, reading and writing one
 src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
+src/chumpeditor/tweaks.py      folding numbered tags into one list tag: Tweaks does this
 src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
@@ -169,7 +201,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         325 tests
+tests/                         352 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

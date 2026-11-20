@@ -18,6 +18,7 @@ from typing import Callable
 
 from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
 
+from .. import tweaks
 from ..chump import ChumpError
 from ..document import (
     CHUMP_GROUP,
@@ -179,6 +180,20 @@ class ChumpWindow(QMainWindow):
     def about(self) -> None:
         """Help > About: what this is, and where it comes from."""
         QMessageBox.about(self, ABOUT_TITLE, about_html())
+
+    def convert_obsolete_lists(self) -> None:
+        """Tweaks > Convert obsolete lists: numbered tags into one list tag.
+
+        The change is made as edits in the text rather than by dropping a new
+        document in, so the caret keeps its place and one Undo takes the whole
+        of it back.  What was done, and what was deliberately left alone, is
+        read out afterwards: a tidy-up nobody can see is a tidy-up nobody trusts.
+        """
+        result = tweaks.convert_obsolete_lists(self.editor.toPlainText())
+        if result.rewrites:
+            self.editor.apply_rewrites(result.rewrites)
+        self.say(result.status)
+        QMessageBox.information(self, "Convert obsolete lists", result.summary())
 
     def _write(self, form: WriteForm, ask: bool) -> Path | None:
         """Write out in one form, and make that the file being edited.

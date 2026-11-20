@@ -2,8 +2,8 @@
 
 The actions are made here and the window does the work behind them, so the
 names, the shortcuts and the enabled state live in one place while the file
-rules themselves stay in ``document.py``, where the command line follows them
-too.
+rules themselves stay in ``document.py`` and the tidy-ups of the text in
+``tweaks.py``, where the command line can follow them too.
 
 Actions are named out loud rather than given Qt's standard roles because the
 two save commands are not the same thing: *Save chump* packs the text back
@@ -23,10 +23,11 @@ __all__ = ["build_menus"]
 
 
 def build_menus(window: QMainWindow) -> None:
-    """Put File, Edit and Help on the window, wired to its methods."""
+    """Put File, Edit, Tweaks and Help on the window, wired to its methods."""
     bar = window.menuBar()
     _file(bar.addMenu("&File"), window)
     _edit(bar.addMenu("&Edit"), window.editor)
+    _tweaks(bar.addMenu("&Tweaks"), window)
     _help(bar.addMenu("&Help"), window)
 
 
@@ -67,6 +68,16 @@ def _edit(menu, editor):
 
     paste.setEnabled(editor.canPaste())
     _clipboard().dataChanged.connect(lambda: paste.setEnabled(editor.canPaste()))
+
+
+def _tweaks(menu, window: QMainWindow) -> None:
+    """One-off tidy-ups of the text itself: fixes for the way files used to be written.
+
+    Nothing here is automatic: every one of them is something a person asks for
+    and then reads the result of, because a change that quietly rewrites an
+    asset's tags is not a change to discover later.
+    """
+    _add(menu, "&Convert obsolete lists", None, window.convert_obsolete_lists)
 
 
 def _help(menu, window: QMainWindow) -> None:
