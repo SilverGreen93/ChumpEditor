@@ -78,6 +78,7 @@ def _tweaks(menu, window: QMainWindow) -> None:
     asset's tags is not a change to discover later.
     """
     _add(menu, "&Convert obsolete lists", None, window.convert_obsolete_lists)
+    _add(menu, "&Remove language tags", None, window.remove_language_tags)
 
 
 def _help(menu, window: QMainWindow) -> None:

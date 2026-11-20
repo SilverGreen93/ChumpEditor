@@ -586,8 +586,11 @@ OBSOLETE = "".join(
 )
 
 
-def test_the_tweaks_menu_holds_the_conversions(window):
-    assert labels(menu_of(window, "Tweaks")) == ["Convert obsolete lists"]
+def test_the_tweaks_menu_holds_both_tidy_ups(window):
+    assert labels(menu_of(window, "Tweaks")) == [
+        "Convert obsolete lists",
+        "Remove language tags",
+    ]
 
 
 def test_converting_folds_the_tags_into_one_line(window, dialogs):
@@ -683,6 +686,89 @@ def test_the_obsolete_sample_converts_in_the_window_and_still_reads(window, dial
     assert names.count("category-era") == 1
     assert "category-era-0" not in names
     assert names.count("category-region") == 1
+
+
+TRANSLATIONS = "".join(
+    line + "\n"
+    for line in (
+        lined("kind", '"interior"'),
+        lined("description", '"woman3"'),
+        lined("description-de", '"Frau3"'),
+        lined("description-ru", '"Прохожая3"'),
+        lined("contact-email", '"nobody@example.com"'),
+    )
+)
+
+
+def test_removing_language_tags_leaves_the_tag_itself_behind(window, dialogs):
+    window.editor.setPlainText(TRANSLATIONS)
+    click(window, "Tweaks", "Remove language tags")
+    assert window.editor.toPlainText() == "".join(
+        line + "\n"
+        for line in (
+            lined("kind", '"interior"'),
+            lined("description", '"woman3"'),
+            lined("contact-email", '"nobody@example.com"'),
+        )
+    )
+
+
+def test_removing_language_tags_says_what_went_and_what_stayed(window, dialogs):
+    window.editor.setPlainText(TRANSLATIONS)
+    click(window, "Tweaks", "Remove language tags")
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("info", "Remove language tags")
+    assert "Removed 2 language tags" in text
+    assert 'description-de "Frau3" went; description stays' in text
+    assert window._message == "Removed 2 language tags"
+
+
+def test_one_press_of_undo_takes_the_whole_sweep_back(window, dialogs):
+    """Every language that went, went as one change."""
+    window.editor.setPlainText(TRANSLATIONS)
+    before = window.editor.toPlainText()
+    click(window, "Tweaks", "Remove language tags")
+    assert window.editor.toPlainText() != before
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == before
+    click(window, "Edit", "Redo")
+    assert lined("description-de", '"Frau3"') not in window.editor.toPlainText()
+
+
+def test_a_file_with_no_language_tags_is_left_alone(window, dialogs):
+    window.editor.setPlainText('kind "interior"\ncontact-email "a@b"\n')
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Remove language tags")
+
+    assert window.editor.toPlainText() == 'kind "interior"\ncontact-email "a@b"\n'
+    assert not window.editor.document().isModified()
+    assert not item(window, "Edit", "Undo").isEnabled()
+    assert dialogs[-1][2].startswith("Nothing was removed")
+    assert window._message == "No language tags"
+
+
+def test_the_obsolete_sample_loses_its_languages_in_the_window(window, dialogs, tmp_path):
+    """Twenty translations out of a real config file, the English still there."""
+    source = copy("obsolete_config.txt", tmp_path)
+    assert window.open_file(source)
+    before = window.editor.toPlainText()
+
+    click(window, "Tweaks", "Remove language tags")
+
+    after = window.editor.toPlainText()
+    assert len(after.split("\n")) == len(before.split("\n")) - 20
+    assert lined("description", '"casualwoman3"') in after
+    assert lined("username", '"casualwoman3"') in after
+    assert "description-ru" not in after
+    assert "username-jp" not in after
+    assert "Left alone" not in dialogs[-1][2]
+    assert dialogs[-1][2].startswith("Removed 20 language tags")
+
+    names = [tag.name for tag in parse_text(after).tags]
+    assert names.count("description") == 1
+    assert names.count("username") == 1
+    assert "contact-email" in names
 
 
 # ---------------------------------------------------------------------------

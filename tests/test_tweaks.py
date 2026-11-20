@@ -1,4 +1,4 @@
-"""Tests for the Tweaks conversion: numbered tags folded into one list tag.
+"""Tests for the two Tweaks: numbered tags folded into one, and language tags.
 
 Nothing here needs a window.  The rules, the edits and the words about them are
 all decided in ``tweaks.py``; ``gui.editor`` only carries the edits out.
@@ -22,6 +22,16 @@ def folded(text: str) -> str:
 def said(text: str) -> str:
     """Everything the conversion had to say, in one string to search."""
     return tweaks.convert_obsolete_lists(text).summary()
+
+
+def cleared(text: str) -> str:
+    """The text a language sweep produces."""
+    return tweaks.remove_language_tags(text).text
+
+
+def told(text: str) -> str:
+    """Everything the sweep had to say, in one string to search."""
+    return tweaks.remove_language_tags(text).summary()
 
 
 # ---------------------------------------------------------------------------
@@ -282,3 +292,240 @@ def test_the_obsolete_config_is_ready_to_be_written_back():
     text = read_text_file(SAMPLES / "obsolete_config.txt")
     result = tweaks.convert_obsolete_lists(text)
     assert tweaks.convert_obsolete_lists(result.text).conversions == ()
+
+
+# ---------------------------------------------------------------------------
+# the language tags
+# ---------------------------------------------------------------------------
+def test_the_plain_tag_stays_and_the_languages_go():
+    text = (
+        'description                             "woman3"\n'
+        'description-ru                          "kobieta3"\n'
+        'description-pl                          "Прохожая3"\n'
+    )
+    assert cleared(text) == 'description                             "woman3"\n'
+
+
+def test_every_language_in_the_file_goes_not_just_the_named_ones():
+    """The ask is about the tags, so every one of them is meant."""
+    text = 'username-cn "a"\nusername-jp "b"\ndescription-de "c"\nkind "interior"\n'
+    assert cleared(text) == 'kind "interior"\n'
+
+
+def test_a_language_tag_is_known_by_the_two_letters_at_the_end_of_the_name():
+    """An email is not written in the Ewe language, and eng is three letters."""
+    text = (
+        'contact-email                           "nobody@example.com"\n'
+        'height-range                            0,3\n'
+        'category-class                          "BR"\n'
+        'description-eng                         "woman3"\n'
+        'description-de                          "Frau3"\n'
+    )
+    assert cleared(text) == (
+        'contact-email                           "nobody@example.com"\n'
+        'height-range                            0,3\n'
+        'category-class                          "BR"\n'
+        'description-eng                         "woman3"\n'
+    )
+
+
+def test_the_language_is_the_last_dash_in_the_name():
+    """description-de-pl ends in -pl, which is the language part of it."""
+    text = 'description-de-pl "woman3"\n'
+    assert cleared(text) == ""
+
+
+def test_a_number_or_a_kuid_after_the_name_is_a_value_like_any_other():
+    text = 'trainz-build 1.5\nload0-ru 3\nkuid-de <kuid2:1:2:3>\n'
+    assert cleared(text) == 'trainz-build 1.5\n'
+
+
+def test_a_value_running_over_several_lines_goes_with_its_tag():
+    text = (
+        'kind "interior"\n'
+        'description-de                          "Frau3\n'
+        '                                       die Frau\n'
+        '"\n'
+        'description                             "woman3"\n'
+    )
+    assert cleared(text) == (
+        'kind "interior"\n'
+        'description                             "woman3"\n'
+    )
+
+
+def test_the_text_inside_a_value_is_not_read_as_tags():
+    """A line of prose that happens to be spelled like a tag stays put."""
+    text = (
+        'license "\n'
+        'description-de was written here in the original\n'
+        '"\n'
+    )
+    assert cleared(text) == text
+
+
+def test_a_container_under_that_name_goes_whole():
+    """Either way of writing the opening brace, the container goes with what is
+    inside it, which is what its value is."""
+    same_line = 'kind "interior"\ndescription-de {\n  name "x"\n}\n'
+    next_line = 'kind "interior"\ndescription-de\n{\n  name "x"\n}\n'
+    assert cleared(same_line) == 'kind "interior"\n'
+    assert cleared(next_line) == 'kind "interior"\n'
+
+
+def test_a_container_fully_inside_a_removed_container_is_cut_once():
+    """The nested tags go with the block, not as edits of their own."""
+    text = (
+        'localised-de {\n'
+        '  short-de "a"\n'
+        '  nested-de {\n'
+        '    deep-de "b"\n'
+        '  }\n'
+        '}\n'
+        'kind "interior"\n'
+    )
+    result = tweaks.remove_language_tags(text)
+    assert result.text == 'kind "interior"\n'
+    assert len(result.rewrites) == 1
+    assert [str(item) for item in result.removals] == [
+        'localised-de { short-de "a" nested-de { deep-de "b" } } went; '
+        "no localised in the file"
+    ]
+
+
+def test_a_language_tag_inside_a_container_that_stays_is_taken_out():
+    text = (
+        'kuid-table {\n'
+        '  description-de "Frau3"\n'
+        '  description "woman3"\n'
+        '}\n'
+    )
+    assert cleared(text) == 'kuid-table {\n  description "woman3"\n}\n'
+
+
+def test_a_tag_holding_nothing_yet_goes_as_cleanly_as_one_holding_a_value():
+    text = 'kind "interior"\ndescription-de\n'
+    assert cleared(text) == 'kind "interior"\n'
+    assert [str(item) for item in tweaks.remove_language_tags(text).removals] == [
+        "description-de went; no description in the file"
+    ]
+
+
+def test_the_line_ending_goes_with_the_tag_so_no_gap_is_left_behind():
+    text = 'kind "interior"\n\ndescription-de "x"\n\nauthor "nobody"\n'
+    assert cleared(text) == 'kind "interior"\n\n\nauthor "nobody"\n'
+
+
+def test_the_last_tag_of_a_file_with_no_line_ending_of_its_own_goes_too():
+    text = 'kind "interior"\ndescription-de "x"'
+    assert cleared(text) == 'kind "interior"\n'
+
+
+def test_a_container_that_is_never_closed_is_left_alone_and_said():
+    text = 'kind "interior"\ndescription-de {\n  name "x"\n'
+    result = tweaks.remove_language_tags(text)
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.notes == ("description-de opens a container that is never closed",)
+    assert told(text).endswith(
+        "Left alone: description-de opens a container that is never closed."
+    )
+
+
+def test_a_value_that_is_never_closed_is_left_alone_and_said():
+    text = 'kind "interior"\ndescription-de "Frau3\nname x\n'
+    result = tweaks.remove_language_tags(text)
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.notes == ("description-de holds a quoted value that is never closed",)
+
+
+def test_a_language_tag_with_no_plain_tag_of_its_own_is_said_out_loud():
+    text = 'description-de "Frau3"\nkind "interior"\n'
+    assert told(text) == (
+        "Removed 1 language tag:\n"
+        "\n"
+        '  description-de "Frau3" went; no description in the file'
+    )
+
+
+def test_the_summary_says_which_tag_was_left_behind():
+    text = (
+        'description "woman3"\n'
+        'description-de "Frau3"\n'
+        'username-cn "a"\n'
+    )
+    assert tweaks.remove_language_tags(text).summary() == (
+        "Removed 2 language tags:\n"
+        "\n"
+        '  description-de "Frau3" went; description stays\n'
+        '  username-cn "a" went; no username in the file'
+    )
+
+
+def test_the_summary_of_a_file_with_no_language_tags_says_so():
+    result = tweaks.remove_language_tags('kind "interior"\ncontact-email "a@b"\n')
+    assert result.status == "No language tags"
+    assert result.rewrites == ()
+    assert result.summary().startswith("Nothing was removed")
+
+
+def test_the_rewrites_point_at_the_text_they_take_out():
+    """The places are document positions, which is what the editor needs."""
+    text = 'kind "interior"\n  description-de "Frau3"\nauthor "nobody"\n'
+    result = tweaks.remove_language_tags(text)
+    assert [
+        text[rewrite.start : rewrite.end] for rewrite in result.rewrites
+    ] == ['  description-de "Frau3"\n']
+    assert all(
+        one.end <= two.start for one, two in zip(result.rewrites, result.rewrites[1:])
+    )
+
+
+def test_a_text_file_written_with_crlf_comes_back_with_crlf():
+    text = 'description "a"\r\ndescription-de "b"\r\nkind "interior"\r\n'
+    assert tweaks.remove_language_tags(text).text == (
+        'description "a"\r\nkind "interior"\r\n'
+    )
+
+
+def test_the_sweep_leaves_nothing_for_a_second_sweep_to_do():
+    text = read_text_file(SAMPLES / "obsolete_config.txt")
+    once = tweaks.remove_language_tags(text)
+    assert tweaks.remove_language_tags(once.text).removals == ()
+
+
+def test_the_language_tags_of_a_real_asset():
+    """Twenty translations out, the English and the license left exactly as they
+    were, and the file still reads."""
+    text = read_text_file(SAMPLES / "obsolete_config.txt")
+    result = tweaks.remove_language_tags(text)
+
+    assert len(result.removals) == 20
+    assert result.notes == ()
+    assert result.status == "Removed 20 language tags"
+
+    for language in ("de", "pl", "cn", "fr", "nl", "es", "ru", "it", "hu", "cz"):
+        assert f"description-{language}" not in result.text
+    for language in ("cn", "nl", "hu", "cz", "jp", "it", "es", "pl", "de", "fr"):
+        assert f"username-{language}" not in result.text
+
+    lines_before = text.split("\r\n")
+    lines_after = result.text.split("\r\n")
+    assert len(lines_after) == len(lines_before) - 20
+    # the license runs over lines and is nobody's translation
+    assert [line for line in lines_after if "license" in line] == [
+        line for line in lines_before if "license" in line
+    ]
+
+    # what is left is the same file with the translations missing: same tags in
+    # the same order, and nothing else changed its value
+    before, after = parse_text(text), parse_text(result.text)
+    gone = {item.tag for item in result.removals}
+    assert [tag.name for tag in after.tags] == [
+        tag.name for tag in before.tags if tag.name not in gone
+    ]
+    assert after.get("contact-email").value == before.get("contact-email").value
+    assert after.get("description").value == before.get("description").value
+    assert after.get("license").value == before.get("license").value
+    assert after.get("kuid-table").tags == before.get("kuid-table").tags

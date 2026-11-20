@@ -182,18 +182,30 @@ class ChumpWindow(QMainWindow):
         QMessageBox.about(self, ABOUT_TITLE, about_html())
 
     def convert_obsolete_lists(self) -> None:
-        """Tweaks > Convert obsolete lists: numbered tags into one list tag.
+        """Tweaks > Convert obsolete lists: numbered tags into one list tag."""
+        self._tweak("Convert obsolete lists", tweaks.convert_obsolete_lists)
+
+    def remove_language_tags(self) -> None:
+        """Tweaks > Remove language tags: description-de and the rest, gone."""
+        self._tweak("Remove language tags", tweaks.remove_language_tags)
+
+    def _tweak(
+        self,
+        title: str,
+        tidy: Callable[[str], tweaks.Tweaks | tweaks.Sweep],
+    ) -> None:
+        """One tidy-up over the text on screen, and then an account of it.
 
         The change is made as edits in the text rather than by dropping a new
         document in, so the caret keeps its place and one Undo takes the whole
         of it back.  What was done, and what was deliberately left alone, is
         read out afterwards: a tidy-up nobody can see is a tidy-up nobody trusts.
         """
-        result = tweaks.convert_obsolete_lists(self.editor.toPlainText())
+        result = tidy(self.editor.toPlainText())
         if result.rewrites:
             self.editor.apply_rewrites(result.rewrites)
         self.say(result.status)
-        QMessageBox.information(self, "Convert obsolete lists", result.summary())
+        QMessageBox.information(self, title, result.summary())
 
     def _write(self, form: WriteForm, ask: bool) -> Path | None:
         """Write out in one form, and make that the file being edited.

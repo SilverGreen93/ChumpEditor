@@ -97,8 +97,8 @@ looked like.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
   chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
-- **Tweaks**: Convert obsolete lists - folding up the numbered tags older
-  versions of Trainz wrote.
+- **Tweaks**: Convert obsolete lists and Remove language tags - the tidy-ups of
+  the way older versions of Trainz wrote a file.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -144,6 +144,30 @@ Nothing is touched when a value holds a `;` itself, or when the file already has
 a tag of the plain name, or when another group of the same tags took that name
 first - those are listed as left alone, with the reason. A `load0` or `camera0`
 carries no dash, means something else entirely, and is never touched.
+
+#### Remove language tags
+
+An asset with text for several languages writes the same tag once per language:
+
+```
+description                             "casualwoman3"
+description-de                          "Freizeit-Frau3"
+description-ru                          "Прохожая3"
+```
+
+**Tweaks > Remove language tags** takes out every tag whose name ends in a dash
+and two letters, the value with it, and leaves the plain `description` standing.
+The message afterwards names every tag that went and says which one stayed, and
+one press of Undo takes the whole sweep back.
+
+The value goes with the tag however it is written: one on the line, one running
+over several lines, or a whole container - its braces and everything inside
+them, since that is its value. The two letters can be any two letters, because
+the assets write `username-cn` and `username-jp` as often as they write the
+proper `-zh` and `-ja`. A tag that is only spelled as if it were one, like
+`contact-email` or a three-letter `description-eng`, is left alone, and so is a
+tag whose value or container is never closed; that is said out loud rather than
+cut into.
 
 ### Colour themes
 
@@ -224,7 +248,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         360 tests
+tests/                         386 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)
