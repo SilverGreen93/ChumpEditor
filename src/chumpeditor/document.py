@@ -8,7 +8,10 @@ tested on their own:
 * saving writes the editor's text back as a binary chump, whatever the name
   the file has now;
 * exporting writes the editor's text as a text file laid out the way the
-  original expander wrote one: UTF-8 with a BOM, CRLF line endings.
+  original expander wrote one: UTF-8 with a BOM, CRLF line endings;
+* both of them start with ``check_text``, so text the format would misread -
+  half a container, a loose quote mark, half a kuid - is reported instead of
+  written.
 """
 
 from __future__ import annotations
@@ -19,9 +22,9 @@ from .chump import (
     CHUMP_SUFFIXES,
     TEXT_SUFFIXES,
     ChumpError,
+    check_text,
     dump_chump,
     parse_chump,
-    parse_text,
     read_text_file,
     render_text,
 )
@@ -35,6 +38,7 @@ __all__ = [
     "TEXT_GROUP",
     "TEXT_SUFFIXES",
     "as_file_text",
+    "check_text",
     "filter_string",
     "is_readable",
     "read_document",
@@ -97,10 +101,11 @@ def save_chump(text: str, path: str | Path) -> Path:
     The line endings go through CRLF first because the editor's document does
     not keep them: a quoted value spanning lines holds whichever ending the
     format uses, and the format uses CRLF, so that is what a value gets back.
-    Anything that does not parse is a ChumpError from the codec, which is where
-    a message about a missing brace belongs.
+    Nothing that fails ``check_text`` is written, so a missing brace, a quote
+    with no partner or half a kuid is a ChumpError naming the line instead of
+    a file Trainz would refuse to read.
     """
-    return dump_chump(parse_text(as_file_text(text)), path)
+    return dump_chump(check_text(as_file_text(text)), path)
 
 
 def save_text(text: str, path: str | Path) -> Path:
@@ -108,8 +113,12 @@ def save_text(text: str, path: str | Path) -> Path:
 
     The text goes out the way the codec writes one, so an export is
     comparable byte for byte with what ``chumpeditor config.chump`` leaves
-    beside it: a BOM, and CRLF on every line.
+    beside it: a BOM, and CRLF on every line.  It is checked first for the
+    same reason the binary form is: an export is a file somebody hands to
+    Trainz, so a value whose quote or ``<`` / ``>`` pair is broken has to be
+    reported rather than written.
     """
+    check_text(as_file_text(text))
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w", encoding="utf-8-sig", errors="surrogateescape", newline="") as stream:

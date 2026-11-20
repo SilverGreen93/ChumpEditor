@@ -1110,6 +1110,37 @@ def test_a_document_that_does_not_pack_is_not_written(window, tmp_path, dialogs)
     assert window.editor.document().isModified()  # the work is still on screen
 
 
+def test_a_loose_quote_mark_is_said_before_any_file_is_asked_for(window, picks, dialogs):
+    replace(window, 'username bob"\n')
+
+    assert window.save() is None
+    assert picks.asked == []  # the check comes first, so no save dialog was opened
+    assert dialogs[-1][0] == "error"
+    assert "line 1: value for tag 'username' has a quote mark" in dialogs[-1][2]
+
+
+def test_exporting_a_document_with_half_a_kuid_writes_nothing(window, picks, tmp_path, dialogs):
+    replace(window, "k <kuid:1:2\n")
+    picks.choose.append(str(tmp_path / "half.txt"))
+
+    assert window.export() is None
+    assert picks.asked == []
+    assert not (tmp_path / "half.txt").exists()
+    assert dialogs[-1][2] == "line 1: value for tag 'k': '<' with no '>' after it"
+
+
+def test_an_unclosed_quote_stops_an_export_but_not_the_work(window, tmp_path, dialogs):
+    source = copy("config2.txt", tmp_path)
+    before = source.read_bytes()
+    window.open_path(source)
+    replace(window, 'name "abc\n')
+
+    assert window.export() is None
+    assert source.read_bytes() == before
+    assert dialogs[-1][0] == "error"
+    assert window.editor.document().isModified()
+
+
 def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path):
     source = copy("config1.chump", tmp_path)
     window.open_path(source)

@@ -23,6 +23,8 @@ from ..chump import ChumpError
 from ..document import (
     CHUMP_GROUP,
     TEXT_GROUP,
+    as_file_text,
+    check_text,
     filter_string,
     is_readable,
     read_document,
@@ -222,12 +224,24 @@ class ChumpWindow(QMainWindow):
         The file changes identity because that is what the window has been
         asked for: exporting a chump to text leaves the text on screen, and so
         the text file is the one it now belongs to.
+
+        The text is looked at before any file is chosen.  A file that cannot be
+        written should not cost anybody a save dialog, and the same check runs
+        again inside the write itself, so the rule is the rule wherever a write
+        comes from.
         """
+        text = self.editor.toPlainText()
+        try:
+            check_text(as_file_text(text))
+        except ChumpError as exc:
+            self.error(str(exc))
+            return None
+
         target = self._target(form, ask)
         if target is None:
             return None
         try:
-            form.write(self.editor.toPlainText(), target)
+            form.write(text, target)
         except (OSError, ChumpError) as exc:
             self.error(f"{target}\n{exc}")
             return None

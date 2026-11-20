@@ -121,6 +121,35 @@ def test_saving_text_that_does_not_parse_is_refused(tmp_path):
     assert not (tmp_path / "half.chump").exists()
 
 
+def test_saving_text_with_a_loose_quote_mark_is_refused(tmp_path):
+    with pytest.raises(ChumpError) as exc:
+        save_chump('username bob"\n', tmp_path / "loose.chump")
+    assert "line 1: value for tag 'username' has a quote mark" in str(exc.value)
+    assert not (tmp_path / "loose.chump").exists()
+
+
+def test_saving_text_with_half_a_kuid_is_refused(tmp_path):
+    with pytest.raises(ChumpError) as exc:
+        save_chump("k <kuid:1:2\n", tmp_path / "half.kuid.chump")
+    assert "'<' with no '>' after it" in str(exc.value)
+    assert not (tmp_path / "half.kuid.chump").exists()
+
+
+def test_exporting_text_that_does_not_parse_is_refused(tmp_path):
+    """An export goes to Trainz too, so it is guarded by the same check."""
+    with pytest.raises(ChumpError) as exc:
+        save_text('k "abc\n', tmp_path / "folder" / "out.txt")
+    assert "line 1: quoted value for tag 'k' is never closed" in str(exc.value)
+    assert not (tmp_path / "folder").exists()  # nothing was set up to write into
+
+
+def test_exporting_a_broken_bracket_pair_is_refused(tmp_path):
+    with pytest.raises(ChumpError) as exc:
+        save_text("kuid kuid:1:2>\n", tmp_path / "brackets.txt")
+    assert "'>' with no '<' before it" in str(exc.value)
+    assert not (tmp_path / "brackets.txt").exists()
+
+
 def test_a_value_spanning_lines_comes_back_with_the_formats_own_endings(tmp_path):
     """The editor holds LF; the format writes CRLF, and so does a save.
 

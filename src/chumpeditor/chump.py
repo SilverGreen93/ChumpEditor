@@ -39,6 +39,7 @@ that uses types this code does not know about still round-trips.
 from __future__ import annotations
 
 import io
+import re
 import struct
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -699,7 +700,7 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
             index += 1
             tags.append(Tag.container(name, children))
         elif rest:
-            value, value_type, index = _parse_value_text(rest, lines, index, eol)
+            value, value_type, index = _parse_value_text(rest, lines, index, eol, name, opened_at)
             tags.append(Tag.value_tag(name, value, value_type))
         elif index < len(lines) and lines[index].strip() == "{":
             index += 1
@@ -725,7 +726,83 @@ def _split_name(stripped: str) -> tuple[str, str]:
     return name, rest
 
 
-def _parse_value_text(rest: str, lines: list[str], index: int, eol: str) -> tuple[object, int, int]:
+def check_text(text: str) -> Tag:
+    """Parse text in the indented form, first blaming a line for what breaks it.
+
+    ``parse_text`` understands the layout of a chump text file and stops at a
+    container whose ``{`` / ``}`` pair is missing one half.  What it cannot see
+    is a quote or a ``<`` / ``>`` pair broken by hand, because a broken pair
+    looks like ordinary text:
+
+    * a quoted value with no line closing it is refused - it would swallow
+      every line that follows, including the ``}`` of a container.  A value may
+      span lines, so a quote on a later line does close a run even where that
+      was not the plan; where a value ends stays the parser's judgement, and
+      this walk reports the case with no closing quote at all;
+    * a quote mark loose in a value that does not start with a quote is
+      refused: that value reads as plain text now, and the next render writes
+      it with a quote in front, which is a different value;
+    * an angle bracket with no partner in a value that is not wrapped in quotes
+      is refused, because it leaves a kuid half written - ``<kuid:1:2`` and
+      ``kuid:1:2>`` both read back as text without the brackets that make a
+      kuid a kuid.
+
+    Inside quotes a value is a string and stays one whatever it holds, so a
+    quote or a bracket in a license string, or in the part of one that runs
+    over from the line before, is prose and is left alone.  The walk follows the
+    same lines as ``_parse_lines`` and reads each line before the parser turns
+    it into tags, which is what lets it name the line at fault.
+    """
+    lines = text.splitlines()
+    index, size = 0, len(lines)
+    while index < size:
+        line = lines[index].strip()
+        index += 1
+        if not line:
+            continue
+        name, rest = _split_name(line)
+        if not rest:
+            continue
+        if rest.startswith('"'):
+            if len(rest) > 1 and rest.endswith('"'):  # a one line string
+                continue
+            # a value running over the lines that follow, left to the parser:
+            # it reads the whole run, and it is the one that says when a value
+            # never got the quote that should have closed it
+            while index < size:
+                if lines[index].endswith('"'):
+                    index += 1  # past the line that closed the value
+                    break
+                index += 1
+            continue
+        if '"' in rest:
+            raise ChumpError(
+                f"line {index}: value for tag '{name}' has a quote mark and does "
+                "not start with one"
+            )
+        _check_brackets(name, index, rest)
+    return parse_text(text)
+
+
+def _check_brackets(name: str, index: int, value: str) -> None:
+    """Complain about a ``<`` or ``>`` in a value that is not wrapped in quotes."""
+    depth = 0
+    for char in value:
+        if char == "<":
+            depth += 1
+        elif char == ">":
+            depth -= 1
+            if depth < 0:
+                raise ChumpError(
+                    f"line {index}: value for tag '{name}': '>' with no '<' before it"
+                )
+    if depth:
+        raise ChumpError(f"line {index}: value for tag '{name}': '<' with no '>' after it")
+
+
+def _parse_value_text(
+    rest: str, lines: list[str], index: int, eol: str, name: str, opened_at: int
+) -> tuple[object, int, int]:
     """A value from the text on its line, plus any continuation lines."""
     if rest.startswith('"'):
         if len(rest) > 1 and rest.endswith('"'):  # a one line string
@@ -741,7 +818,9 @@ def _parse_value_text(rest: str, lines: list[str], index: int, eol: str) -> tupl
             chunks.append(line)
             index += 1
         else:
-            raise ChumpError("a quoted value is never closed")
+            raise ChumpError(
+                f"line {opened_at + 1}: quoted value for tag '{name}' is never closed"
+            )
         return eol.join(chunks), TagType.STRING, index
 
     if rest.startswith("<"):
@@ -755,7 +834,7 @@ def _parse_value_text(rest: str, lines: list[str], index: int, eol: str) -> tupl
         for part in parts:
             if not part:
                 raise ChumpError(f"the value {rest!r} has an empty element")
-            value, part_type, index = _parse_one_text(part, lines, index, eol)
+            value, part_type, index = _parse_one_text(part, lines, index, eol, name, opened_at)
             if value_type is None:
                 value_type = part_type
             elif part_type != value_type:
@@ -766,12 +845,14 @@ def _parse_value_text(rest: str, lines: list[str], index: int, eol: str) -> tupl
             values.append(value)
         return values, value_type, index
 
-    return _parse_one_text(rest, lines, index, eol)
+    return _parse_one_text(rest, lines, index, eol, name, opened_at)
 
 
-def _parse_one_text(token: str, lines: list[str], index: int, eol: str) -> tuple[object, int, int]:
+def _parse_one_text(
+    token: str, lines: list[str], index: int, eol: str, name: str, opened_at: int
+) -> tuple[object, int, int]:
     if token.startswith('"'):
-        value, value_type, index = _parse_value_text(token, lines, index, eol)
+        value, value_type, index = _parse_value_text(token, lines, index, eol, name, opened_at)
         return value, value_type, index
     if token.startswith("<"):
         return Kuid(token), TagType.KUID, index

@@ -20,6 +20,7 @@ from chumpeditor.chump import (
     RawValue,
     Tag,
     TagType,
+    check_text,
     convert_file,
     dump_chump,
     dump_text,
@@ -777,7 +778,7 @@ def test_a_closing_brace_at_the_top_level_is_reported():
 
 
 def test_a_quoted_value_that_is_never_closed_is_reported():
-    with pytest.raises(ChumpError, match="a quoted value is never closed"):
+    with pytest.raises(ChumpError, match=r"line 1: quoted value for tag 'k' is never closed"):
         parse_text('k "abc')
 
 
@@ -800,6 +801,73 @@ def test_a_number_larger_than_int32_is_refused_when_it_is_written():
 
 def test_a_value_tag_and_a_brace_do_not_mix():
     assert parse_text('k "{"').tags[0].value == "{"
+
+
+# --------------------------------------------------------------------------
+# the check a write is guarded by: quotes and angle brackets
+# --------------------------------------------------------------------------
+def test_check_text_hands_back_the_tags_the_parser_makes():
+    assert check_text('k 1\ns "two"\n') == parse_text('k 1\ns "two"\n')
+
+
+def test_a_quote_mark_in_a_value_that_does_not_start_with_one_is_reported():
+    with pytest.raises(ChumpError, match=r"line 2: value for tag 'username' has a quote mark"):
+        check_text("k 1\nusername bob\"\n")
+
+
+def test_a_quoted_value_that_never_gets_its_closing_quote_is_reported_by_line():
+    with pytest.raises(ChumpError, match=r"line 4: quoted value for tag 'k' is never closed"):
+        check_text("k 1\nt\n{\nk \"abc\n}\n")
+
+
+def test_a_quoted_value_with_text_after_its_closing_quote_is_reported():
+    with pytest.raises(ChumpError, match="quoted value for tag 'k' is never closed"):
+        check_text('k "say "hi" and no more\n')
+
+
+def test_quotes_that_pair_up_inside_a_quoted_value_are_kept():
+    assert check_text('k "say ""hi"" ok"').tags[0].value == 'say ""hi"" ok'
+
+
+def test_a_kuid_without_its_closing_bracket_is_reported():
+    with pytest.raises(ChumpError, match=r"line 1: value for tag 'kuid': '<' with no '>' after it"):
+        check_text("kuid <kuid:1:2\n")
+
+
+def test_a_kuid_without_its_opening_bracket_is_reported():
+    with pytest.raises(ChumpError, match=r"line 1: value for tag 'kuid': '>' with no '<' before"):
+        check_text("kuid kuid:1:2>\n")
+
+
+def test_a_kuid_inside_a_container_is_blamed_on_its_own_line():
+    with pytest.raises(ChumpError, match=r"line 3: value for tag 'k': '<' with no '>' after it"):
+        check_text("kuid-table\n{\nk <kuid:1:2\n}\n")
+
+
+def test_a_quoted_value_may_hold_angle_brackets():
+    assert check_text('d "less than < and a > sign"').tags[0].value == "less than < and a > sign"
+
+
+def test_an_unquoted_value_may_hold_a_pair_of_angle_brackets():
+    assert check_text("d prose <not a kuid> here").tags[0].value == "prose <not a kuid> here"
+
+
+def test_a_value_spanning_lines_says_what_it_likes():
+    """A license string holds quotes and brackets; only its own quotes count."""
+    text = (
+        'license "a < b and a > sign\n'
+        'and a quote " inside\n'
+        'and an unclosed bracket <"\n'
+        'name "ok"\n'
+    )
+    tags = check_text(text).tags
+    assert tags[0].value == 'a < b and a > sign\nand a quote " inside\nand an unclosed bracket <'
+    assert [tag.name for tag in tags] == ["license", "name"]
+
+
+def test_the_sample_text_files_pass_the_check():
+    for stem in ("config1", "config2", "config3", "obsolete_config"):
+        check_text(read_text_file(SAMPLES / f"{stem}.txt"))
 
 
 # --------------------------------------------------------------------------
