@@ -18,6 +18,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
+from PyQt6.QtCore import QUrl  # noqa: E402
+from PyQt6.QtGui import QDragLeaveEvent  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
     QListWidget,
@@ -27,12 +29,14 @@ from PyQt6.QtWidgets import (  # noqa: E402
 )
 
 from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file  # noqa: E402
-from chumpeditor.document import save_chump  # noqa: E402
+from chumpeditor.document import as_file_text, save_chump  # noqa: E402
 from chumpeditor.gui import APP_TITLE, ChumpWindow, RichTextEditor  # noqa: E402
+from chumpeditor.gui.drops import accept_file_drop  # noqa: E402
 from chumpeditor.gui.editor import code_font  # noqa: E402
 from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
     CREDIT,
+    DROP_HINT,
     ICON_FILE,
     SUMMARY,
     resource_path,
@@ -233,6 +237,129 @@ def test_a_broken_file_named_on_the_command_line_does_not_stop_the_window(window
     assert started.editor.toPlainText() == ""
     assert started.path is None
     assert dialogs and dialogs[0][0] == "error"
+
+
+# ---------------------------------------------------------------------------
+# drag and drop: a file can be let go anywhere in the window
+# ---------------------------------------------------------------------------
+class _FakeMime:
+    """Enough of QMimeData for the two questions the window asks."""
+
+    def __init__(self, urls=(), text: str = ""):
+        self._urls = list(urls)
+        self._text = text
+
+    def hasUrls(self):  # noqa: N802 - Qt naming
+        return bool(self._urls)
+
+    def urls(self):
+        return [QUrl.fromLocalFile(path) for path in self._urls]
+
+    def hasText(self):  # noqa: N802 - Qt naming
+        return bool(self._text)
+
+    def text(self):
+        return self._text
+
+
+class _FakeDrop:
+    def __init__(self, paths=(), text: str = ""):
+        self._mime = _FakeMime(list(paths), text)
+        self.accepted = False
+
+    def mimeData(self):  # noqa: N802 - Qt naming
+        return self._mime
+
+    def acceptProposedAction(self):  # noqa: N802 - Qt naming
+        self.accepted = True
+
+
+def test_both_the_window_and_the_text_area_take_drops(window):
+    assert window.acceptDrops()
+    assert window.editor.acceptDrops()
+
+
+def test_dropping_a_chump_on_the_window_loads_it(window, tmp_path):
+    source = copy("config1.chump", tmp_path)
+    event = _FakeDrop([str(source)])
+    window.dragEnterEvent(event)
+    assert event.accepted
+    window.dropEvent(event)
+    assert window.path == source
+    assert window.editor.toPlainText() != ""
+
+
+def test_dropping_on_the_text_area_loads_it_too(window, tmp_path):
+    source = copy("config2.chump", tmp_path)
+    window.editor.dropEvent(_FakeDrop([str(source)]))
+    assert window.path == source
+    # the text goes through the same line ending rule saving uses, because a
+    # quoted value in this sample spans lines
+    assert parse_text(as_file_text(text_of(window.editor))) == load_chump(source)
+
+
+def test_the_text_area_takes_care_of_its_own_drag_hints(window, tmp_path):
+    event = _FakeDrop([str(copy("config1.chump", tmp_path))])
+    window.open_paths([str(copy("config2.chump", tmp_path))])
+    opened = window.statusBar().currentMessage()
+
+    window.editor.dragEnterEvent(event)
+    assert window.statusBar().currentMessage() == DROP_HINT
+    window.editor.dragLeaveEvent(QDragLeaveEvent())
+    assert window.statusBar().currentMessage() == opened
+
+
+def test_dragging_over_the_window_offers_the_hint_too(window, tmp_path):
+    window.say("something worth keeping")
+    window.dragEnterEvent(_FakeDrop([str(copy("config1.chump", tmp_path))]))
+    assert window.statusBar().currentMessage() == DROP_HINT
+    window.dragLeaveEvent(_FakeDrop())
+    assert window.statusBar().currentMessage() == "something worth keeping"
+
+
+def test_a_drop_of_nothing_usable_leaves_the_editor_alone(window, tmp_path):
+    notes = tmp_path / "notes.bin"
+    notes.write_text("nope")
+    window.dropEvent(_FakeDrop([str(notes)]))
+    assert window.path is None
+    assert window.editor.toPlainText() == ""
+    assert "no .chump" in window.statusBar().currentMessage()
+
+
+def test_dropping_a_second_file_replaces_the_one_on_screen(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("config2.chump", tmp_path)
+    window.dropEvent(_FakeDrop([str(first)]))
+    window.dropEvent(_FakeDrop([str(second)]))
+    assert window.path == second
+    assert window.windowTitle() == f"config2.chump - {APP_TITLE}"
+
+
+def test_a_file_that_will_not_open_is_a_dialog_not_a_crash(window, dialogs, tmp_path):
+    broken = tmp_path / "broken.chump"
+    broken.write_bytes(b"nope")
+    window.editor.dropEvent(_FakeDrop([str(broken)]))
+    assert window.path is None
+    assert dialogs and dialogs[0][0] == "error"
+
+
+def test_a_drag_of_plain_text_is_left_to_the_editor(window):
+    """Dragging text in is not a file, so QTextEdit keeps handling it."""
+    event = _FakeDrop(text="kuid <kuid:1:2>")
+    assert not accept_file_drop(event)
+    assert not event.accepted
+
+    taken = _FakeDrop([str(Path("whatever.txt"))])
+    assert accept_file_drop(taken)
+    assert taken.accepted
+
+
+def test_dropping_reports_which_files_were_left_out(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("config2.chump", tmp_path)
+    window.dropEvent(_FakeDrop([str(first), str(second)]))
+    assert window.path == first
+    assert "config2.chump" in window.statusBar().currentMessage()
 
 
 # ---------------------------------------------------------------------------

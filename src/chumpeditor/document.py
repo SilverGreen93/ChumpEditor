@@ -95,7 +95,7 @@ def save_chump(text: str, path: str | Path) -> Path:
     Anything that does not parse is a ChumpError from the codec, which is where
     a message about a missing brace belongs.
     """
-    return dump_chump(parse_text(_as_crlf(text)), path)
+    return dump_chump(parse_text(as_file_text(text)), path)
 
 
 def save_text(text: str, path: str | Path) -> Path:
@@ -108,12 +108,17 @@ def save_text(text: str, path: str | Path) -> Path:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w", encoding="utf-8-sig", errors="surrogateescape", newline="") as stream:
-        stream.write(_as_crlf(text))
+        stream.write(as_file_text(text))
     return target
 
 
-def _as_crlf(text: str) -> str:
-    """Line endings as one kind, CRLF, whatever the editor used."""
+def as_file_text(text: str) -> str:
+    """Line endings as one kind, CRLF, whatever the editor used.
+
+    Worth knowing about on its own: a quoted value that spans lines holds the
+    line ending the format uses, so text that came from a Qt document has to be
+    put back the way the format has it before it is parsed.
+    """
     return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
 
 

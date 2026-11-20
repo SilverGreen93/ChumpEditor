@@ -14,8 +14,9 @@ from PyQt6.QtWidgets import QMainWindow, QMessageBox
 
 from ..chump import ChumpError
 from ..document import is_readable, read_document
+from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
-from .resources import APP_TITLE, SUMMARY, window_icon
+from .resources import APP_TITLE, DROP_HINT, window_icon
 
 __all__ = ["ChumpWindow", "WINDOW_SIZE"]
 
@@ -32,6 +33,7 @@ class ChumpWindow(QMainWindow):
     def __init__(self, paths: list[str] | None = None) -> None:
         super().__init__()
         self.path: Path | None = None
+        self._message = ""
 
         self.editor = RichTextEditor(self)
         self.setCentralWidget(self.editor)
@@ -45,7 +47,12 @@ class ChumpWindow(QMainWindow):
         # the star in the title follows the document's own idea of being changed
         self.editor.document().modificationChanged.connect(lambda _changed: self._refresh_title())
 
-        self.statusBar().showMessage(SUMMARY)
+        # a file can be let go anywhere in the window, the text included
+        self.setAcceptDrops(True)
+        self.editor.files_dropped.connect(self.open_paths)
+        self.editor.files_dragging.connect(self._drop_hint)
+
+        self.say(DROP_HINT)
 
         if paths:
             self.open_paths(paths)
@@ -102,9 +109,29 @@ class ChumpWindow(QMainWindow):
             self.say(f"Opened {opened.name}; one file at a time, so not {skipped}")
         return opened
 
+    # -- drag and drop ------------------------------------------------------
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if accept_file_drop(event):
+            self._drop_hint(True)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        accept_file_drop(event)  # without this the drop is never offered
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self._drop_hint(False)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if accept_file_drop(event):
+            self.open_paths(dropped_paths(event.mimeData()))
+
+    def _drop_hint(self, active: bool) -> None:
+        """Offer the hint while a file hovers, and give the line back after."""
+        self.statusBar().showMessage(DROP_HINT if active else self._message)
+
     # -- messages -----------------------------------------------------------
     def say(self, text: str) -> None:
         """A line in the status bar: what just happened, or what to do next."""
+        self._message = text
         self.statusBar().showMessage(text)
 
     def error(self, message: str) -> None:

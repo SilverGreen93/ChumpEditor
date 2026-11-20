@@ -8,8 +8,11 @@ text came from is the window's business, not this widget's.
 
 from __future__ import annotations
 
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import QTextEdit
+
+from .drops import accept_file_drop, dropped_paths
 
 __all__ = ["RichTextEditor", "code_font"]
 
@@ -41,15 +44,48 @@ def code_font() -> QFont:
 class RichTextEditor(QTextEdit):
     """The document: editable, colourable, and it knows how it is displayed."""
 
+    #: local paths dropped straight onto the text, which the window opens
+    files_dropped = pyqtSignal(list)
+    #: a file drag is over the text (True) or has left it (False)
+    files_dragging = pyqtSignal(bool)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setAcceptRichText(True)  # colours and attributes stay in the document
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(code_font())
         self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
+        self.setAcceptDrops(True)  # a file lands here as often as on the frame
 
     def set_line_wrap(self, wrap: bool) -> None:
         """Wrapped for reading, straight for keeping the columns honest."""
         self.setLineWrapMode(
             QTextEdit.LineWrapMode.WidgetWidth if wrap else QTextEdit.LineWrapMode.NoWrap
         )
+
+    # -- drag and drop ------------------------------------------------------
+    def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if accept_file_drop(event):
+            self.files_dragging.emit(True)
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if not accept_file_drop(event):
+            super().dragMoveEvent(event)
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        self.files_dragging.emit(False)
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Files go to the window; anything else is QTextEdit's own business.
+
+        Without this a dropped file would be inserted into the text as a line
+        of path names, since that is what a text edit does with urls.
+        """
+        self.files_dragging.emit(False)
+        if not accept_file_drop(event):
+            super().dropEvent(event)
+            return
+        self.files_dropped.emit(dropped_paths(event.mimeData()))

@@ -20,6 +20,7 @@ __all__ = [
     "AUTHOR",
     "CREDIT",
     "DESCRIPTION",
+    "DROP_HINT",
     "HOME_URL",
     "ICON_FILE",
     "ISSUES_URL",
@@ -43,6 +44,9 @@ DESCRIPTION = (
 AUTHOR = "SilverGreen93"
 #: the copyright line, in the About box and wherever else the app signs itself
 CREDIT = f"© {datetime.date.today().year} {AUTHOR}"
+
+#: what the status bar says while a file is being dragged over the window
+DROP_HINT = "Drop a .chump, .cdp or .txt file to open it"
 
 #: the icon, bundled next to the code (source tree) or into the exe
 ICON_FILE = "chumpeditor.ico"
