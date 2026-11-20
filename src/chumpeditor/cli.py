@@ -18,10 +18,8 @@ from .chump import (
     TEXT_SUFFIXES,
     ChumpError,
     convert_file,
-    parse_chump,
-    read_text_file,
-    render_text,
 )
+from .document import read_document
 
 __all__ = ["main", "run_cli", "text_of"]
 
@@ -108,18 +106,12 @@ def verb(path: Path) -> str:
 
 
 def text_of(path: str | Path) -> str:
-    """The text form of a file, whether it comes in as chump or as text."""
-    source = Path(path)
-    suffix = source.suffix.lower()
-    if suffix in CHUMP_SUFFIXES:
-        with source.open("rb") as stream:
-            return render_text(parse_chump(stream.read()))
-    if suffix in TEXT_SUFFIXES:
-        return read_text_file(source)
-    raise ChumpError(
-        f"not a chump file ('{'/'.join(CHUMP_SUFFIXES)}') "
-        f"and not a text file ('{'/'.join(TEXT_SUFFIXES)}')"
-    )
+    """The text form of a file, whether it comes in as chump or as text.
+
+    The same rule the editor follows, so ``--stdout`` shows exactly what the
+    window would have shown for that file.
+    """
+    return read_document(path)
 
 
 if __name__ == "__main__":

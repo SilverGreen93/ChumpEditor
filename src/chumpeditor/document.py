@@ -1,0 +1,133 @@
+"""The file side of the editor: what opening, saving and exporting mean.
+
+Deliberately free of Qt, so the rules the window follows can be read and
+tested on their own:
+
+* opening a ``.chump`` or ``.cdp`` puts its text form in the editor, opening a
+  ``.txt`` puts the file in as it stands;
+* saving writes the editor's text back as a binary chump, whatever the name
+  the file has now;
+* exporting writes the editor's text as a text file laid out the way the
+  original expander wrote one: UTF-8 with a BOM, CRLF line endings.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .chump import (
+    CHUMP_SUFFIXES,
+    TEXT_SUFFIXES,
+    ChumpError,
+    dump_chump,
+    parse_chump,
+    parse_text,
+    read_text_file,
+    render_text,
+)
+
+__all__ = [
+    "ALL_SUFFIXES",
+    "CHUMP_SUFFIXES",
+    "TEXT_SUFFIXES",
+    "filter_string",
+    "is_readable",
+    "read_document",
+    "save_chump",
+    "save_text",
+    "suggested_path",
+]
+
+#: every extension the editor takes, chump forms first
+ALL_SUFFIXES = CHUMP_SUFFIXES + TEXT_SUFFIXES
+
+#: the labels and wildcards the open and save dialogs offer, in that order
+FILTERS = (
+    ("All supported files", ALL_SUFFIXES),
+    ("Chump files", CHUMP_SUFFIXES),
+    ("Text files", TEXT_SUFFIXES),
+)
+
+
+def filter_string(*groups: tuple[str, tuple[str, ...]]) -> str:
+    """The groups as one filter string for QFileDialog.
+
+    A group is a label and the extensions it covers; ``getOpenFileName`` wants
+    them as ``label (*.a *.b);;label2 (*.c)``.
+    """
+    groups = groups or FILTERS
+    return ";;".join(
+        f"{label} ({' '.join('*' + suffix for suffix in suffixes)})"
+        for label, suffixes in groups
+    )
+
+
+def is_readable(path: str | Path) -> bool:
+    """A file the editor can open: one of the forms, there on disk."""
+    file = Path(path)
+    return file.is_file() and file.suffix.lower() in ALL_SUFFIXES
+
+
+def read_document(path: str | Path) -> str:
+    """The text the editor shows for a file, whichever form it is in.
+
+    A binary chump is expanded first; a text file is read as it stands, so the
+    spacing a file already has survives an open-and-save round trip.
+    """
+    source = Path(path)
+    suffix = source.suffix.lower()
+    if suffix in CHUMP_SUFFIXES:
+        return render_text(parse_chump(source.read_bytes()))
+    if suffix in TEXT_SUFFIXES:
+        return read_text_file(source)
+    raise ChumpError(
+        f"{source.name}: not a chump file ('{'/'.join(CHUMP_SUFFIXES)}') "
+        f"and not a text file ('{'/'.join(TEXT_SUFFIXES)}')"
+    )
+
+
+def save_chump(text: str, path: str | Path) -> Path:
+    """Pack the editor's text into a binary chump file.
+
+    The line endings go through CRLF first because the editor's document does
+    not keep them: a quoted value spanning lines holds whichever ending the
+    format uses, and the format uses CRLF, so that is what a value gets back.
+    Anything that does not parse is a ChumpError from the codec, which is where
+    a message about a missing brace belongs.
+    """
+    return dump_chump(parse_text(_as_crlf(text)), path)
+
+
+def save_text(text: str, path: str | Path) -> Path:
+    """Write the editor's text as a chump text file.
+
+    The text goes out the way the codec writes one, so an export is
+    comparable byte for byte with what ``chumpeditor config.chump`` leaves
+    beside it: a BOM, and CRLF on every line.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8-sig", errors="surrogateescape", newline="") as stream:
+        stream.write(_as_crlf(text))
+    return target
+
+
+def _as_crlf(text: str) -> str:
+    """Line endings as one kind, CRLF, whatever the editor used."""
+    return text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\r\n")
+
+
+def suggested_path(path: str | Path | None, suffix: str) -> Path | None:
+    """A sensible name to pre-fill a save dialog with.
+
+    The file being edited keeps its name and takes the new extension, which is
+    the rule the command line follows too; without a file to go on there is
+    nothing to suggest and the dialog starts empty.
+    """
+    if path is None:
+        return None
+    current = Path(path)
+    suffix = suffix if suffix.startswith(".") else f".{suffix}"
+    if current.suffix.lower() == suffix:
+        return current
+    return current.with_suffix(suffix)

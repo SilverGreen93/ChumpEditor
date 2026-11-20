@@ -1,8 +1,8 @@
 """PyInstaller entry point for the GUI exe (ChumpEditor.exe).
 
 Built with --windowed (GUI subsystem) so double-clicking the exe opens the
-GUI without a terminal flash.  Paths given on the command line are queued in
-the window, exactly like passing them to the original VB.NET build.
+GUI without a terminal flash.  Paths given on the command line open in the
+editor straight away, the first one being the one that ends up on screen.
 """
 
 import sys

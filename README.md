@@ -73,34 +73,37 @@ writes binary.
 
 ## GUI
 
-The window is deliberately the one the original expander had: a file queue,
-and three buttons.
+The main area is one rich text editor: the text form of a file, in a fixed
+width font, colours and attributes (bold, italic) living in the document.
 
-- Drop `.chump` and `.txt` files onto the window (there is no file picker, and
-  that is how it was). A converted row is rewritten as `input  ->  output`.
-- **Expand chump** converts everything in the queue - `.txt` rows are packed
-  back, not skipped.
-- **Remove item** takes the selected row out of the queue, **Clear list** empties it.
-- A file that cannot be read is reported and stays in the list.
+- Name a `.chump`, `.cdp` or `.txt` on the command line and it opens straight
+  in the editor; a binary chump is expanded for display and nothing is written
+  until you save.
+- The title carries the file's name and a `*` while it has changes that are
+  not on disk.
+- One file at a time. Several paths at once open the first and say which ones
+  were left out.
 
 ## Project layout
 
 ```
-src/chumpeditor/chump.py     the codec: parse/pack binary, parse/pack text, convert_file
-src/chumpeditor/cli.py       command line
-src/chumpeditor/gui.py       PyQt6 window
-chumpeditor_cli_entry.py     entry points used by PyInstaller
+src/chumpeditor/chump.py       the codec: parse/pack binary, parse/pack text, convert_file
+src/chumpeditor/document.py    opening, saving, exporting: the rules the editor follows
+src/chumpeditor/cli.py         command line
+src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, resources.py
+chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                       188 tests
-tests/test_files/            sample .chump/.txt pairs
-build.py                     PyInstaller exes, dmg, deb, pkg.tar.zst
-installer/                   WiX v5 per-user MSI (Windows)
-hooks/                       PyInstaller hooks
-assets/                      icon and README screenshot
+tests/                         196 tests
+tests/test_files/              sample .chump/.txt pairs
+build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
+installer/                     WiX v5 per-user MSI (Windows)
+hooks/                         PyInstaller hooks
+assets/                        icon and README screenshot
 ```
 
-The GUI and the command line both call `convert_file()` in `chump.py`, so the
-extension rule exists once.
+The GUI and the command line both go through `chump.py`: `document.py` holds
+the open/save/export rules the window follows, `convert_file()` the extension
+rule the CLI follows, so neither rule is written twice.
 
 ## Tests
 
