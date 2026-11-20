@@ -14,11 +14,18 @@ cover, so changing a colour means changing one line.
 A style may name a second colour for a dark background, since the whole point
 of a colour is that it can be seen; ``gui.editor`` says which of the two the
 text is sitting on.
+
+A list of keywords may give regular expressions instead of, or as well as,
+literal words, so a family of tags written ``category-era-0``, ``category-era-1``
+and on takes one line rather than one entry each.  A theme can also say that a
+tag ending in a two letter language suffix - ``description-ru`` - is coloured as
+the tag it is written after.  ``scan.py`` is what applies both.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -38,6 +45,12 @@ __all__ = [
 
 #: the theme used when nothing else is asked for
 DEFAULT_THEME = "trainz.json"
+
+#: the tail a tag carries when it is written for one language: a hyphen and two
+#: letters, as in description-ru.  Only the shape is checked, because a list of
+#: every two letter language code is not something this program could keep up
+#: to date, and a wrong guess only means a tag stays its default colour.
+_LANGUAGE_SUFFIX = re.compile(r"-[A-Za-z]{2}$")
 
 
 class ThemeError(ValueError):
@@ -75,10 +88,16 @@ class Pair:
 
 @dataclass(frozen=True)
 class Keywords:
-    """A list of words that share a style."""
+    """One style, and the words and the patterns that wear it.
+
+    ``patterns`` are regular expressions tried against a whole word, never part
+    of one, which is what lets a family of tags - ``category-era-0``,
+    ``category-era-1``, and however many more - be written as one line.
+    """
 
     style: str
     words: tuple[str, ...] = ()
+    patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -91,8 +110,14 @@ class Theme:
     keywords: tuple[Keywords, ...] = ()
     numbers: str | None = None
     case_sensitive: bool = True
+    #: a tag ending in a two letter language suffix is coloured as the tag it
+    #: is written after: description-ru reads as description
+    language_suffixes: bool = False
     #: each keyword against the style it belongs to; built once, not stored twice
     words: dict[str, str] = field(default_factory=dict, compare=False)
+    #: each pattern of the keyword lists, compiled, with the style it gives;
+    #: tried in the order the theme lists them, and the first one wins
+    matchers: tuple[tuple[re.Pattern[str], str], ...] = field(default_factory=tuple, compare=False)
 
     def __post_init__(self) -> None:
         if not self.words:
@@ -104,10 +129,46 @@ class Theme:
                     key = word if self.case_sensitive else word.lower()
                     table[key] = group.style
             object.__setattr__(self, "words", table)
+        if not self.matchers:
+            flags = 0 if self.case_sensitive else re.IGNORECASE
+            object.__setattr__(
+                self,
+                "matchers",
+                tuple(
+                    (re.compile(pattern, flags), group.style)
+                    for group in self.keywords
+                    for pattern in group.patterns
+                ),
+            )
 
     def style(self, id: str) -> Style:
         """The style named by a rule; the default covers anything unaccounted for."""
         return self.styles.get(id) or self.styles.get("default", Style("default"))
+
+    def keyword_style(self, word: str) -> str | None:
+        """The style a whole word asks for, or nothing when no rule covers it.
+
+        The lists of words are tried before the patterns, so a theme can still
+        pick one member of a family out and colour it another way.  A theme that
+        counts language suffixes tries once more with a trailing ``-ru`` style
+        tail taken off, which is how a tag written for one language is coloured
+        as the tag it belongs to.
+        """
+        style = self._style_of_word(word)
+        if style or not self.language_suffixes:
+            return style
+        base = _LANGUAGE_SUFFIX.sub("", word)
+        return self._style_of_word(base) if base != word else None
+
+    def _style_of_word(self, word: str) -> str | None:
+        """One word against the lists, and then against the patterns."""
+        style = self.words.get(word if self.case_sensitive else word.lower())
+        if style:
+            return style
+        for pattern, style in self.matchers:
+            if pattern.fullmatch(word):
+                return style
+        return None
 
     @property
     def default(self) -> Style:
@@ -115,16 +176,22 @@ class Theme:
 
     def to_json(self) -> dict:
         """The theme as it is written to disk."""
-        return {
+        written: dict = {
             "name": self.name,
             "caseSensitive": self.case_sensitive,
-            "styles": {
-                name: _style_as_written(style) for name, style in self.styles.items()
-            },
-            "pairs": [{"style": p.style, "open": p.open, "close": p.close} for p in self.pairs],
-            "keywords": [{"style": k.style, "words": list(k.words)} for k in self.keywords],
-            "numbers": self.numbers,
         }
+        if self.language_suffixes:
+            written["languageSuffixes"] = True
+        written["styles"] = {
+            name: _style_as_written(style) for name, style in self.styles.items()
+        }
+        written["pairs"] = [
+            {"style": pair.style, "open": pair.open, "close": pair.close}
+            for pair in self.pairs
+        ]
+        written["keywords"] = [_keywords_as_written(group) for group in self.keywords]
+        written["numbers"] = self.numbers
+        return written
 
 
 def theme_path(name: str = DEFAULT_THEME) -> Path:
@@ -198,6 +265,7 @@ def parse_theme(data: object, origin: str = "theme") -> Theme:
         keywords=groups,
         numbers=numbers if isinstance(numbers, str) else None,
         case_sensitive=bool(data.get("caseSensitive", True)),
+        language_suffixes=bool(data.get("languageSuffixes", False)),
     )
 
 
@@ -270,8 +338,34 @@ def _keywords(data: object, styles: dict[str, Style], origin: str) -> tuple[Keyw
         words = entry.get("words", [])
         if not isinstance(words, list):
             raise ThemeError(f"{origin}: the words of {style!r} are a list")
-        groups.append(Keywords(style=style, words=tuple(str(word) for word in words)))
+        written = entry.get("patterns", [])
+        patterns = _as_list([written] if isinstance(written, str) else written, "patterns", origin)
+        sources = tuple(str(pattern) for pattern in patterns)
+        for pattern in sources:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ThemeError(
+                    f"{origin}: the patterns of {style!r} have one that cannot be read:"
+                    f" {pattern!r} ({exc.msg})"
+                ) from exc
+        groups.append(
+            Keywords(
+                style=style,
+                words=tuple(str(word) for word in words),
+                patterns=sources,
+            )
+        )
     return tuple(groups)
+
+
+def _keywords_as_written(group: Keywords) -> dict:
+    """One keyword list in the form the file holds it: the patterns only when
+    the list has any, so a theme of plain words stays as short as it was."""
+    written = {"style": group.style, "words": list(group.words)}
+    if group.patterns:
+        written["patterns"] = list(group.patterns)
+    return written
 
 
 def _style_id(value: object, styles: dict[str, Style], what: str, origin: str) -> str:

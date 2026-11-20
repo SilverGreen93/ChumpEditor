@@ -104,8 +104,13 @@ def _closing(text: str, pair, start: int) -> int | None:
 
 
 def _style_of(word: str, theme: Theme) -> str | None:
-    """The style a word asks for, if any: a keyword, then a number, then none."""
-    style = theme.words.get(word)
+    """The style a word asks for, if any: a keyword, then a number, then none.
+
+    Which words count as keywords - the ones listed, the ones a pattern of the
+    theme reaches, and the ones carrying a language suffix - is the theme's
+    business, in ``chumpeditor.theme``; this only asks it the question.
+    """
+    style = theme.keyword_style(word)
     if style:
         return style
     if theme.numbers and _NUMBER.fullmatch(word):

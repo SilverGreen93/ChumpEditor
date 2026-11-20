@@ -1,6 +1,7 @@
 {
   "name": "Trainz Config",
   "caseSensitive": true,
+  "languageSuffixes": true,
   "styles": {
     "default": {
       "colour": "#000000",
@@ -139,31 +140,6 @@
         "mousespeed",
         "radius",
         "cameradefault",
-        "camera0",
-        "camera1",
-        "camera2",
-        "camera3",
-        "camera4",
-        "camera5",
-        "camera6",
-        "camera7",
-        "camera8",
-        "camera9",
-        "car0",
-        "car1",
-        "car2",
-        "car3",
-        "car4",
-        "car5",
-        "car6",
-        "car7",
-        "car8",
-        "car9",
-        "car10",
-        "car11",
-        "car12",
-        "car13",
-        "car14",
         "font",
         "visible-on-minimap",
         "category-keyword",
@@ -223,8 +199,6 @@
         "bogey",
         "dighole",
         "istunnel",
-        "smoke0",
-        "smoke1",
         "attachment",
         "mode",
         "frequency",
@@ -269,12 +243,6 @@
         "dont-scale-mesh-to-fit-length",
         "lod-length",
         "info-url",
-        "wave0-magnitude",
-        "wave0-scale",
-        "wave0-speed",
-        "wave1-magnitude",
-        "wave1-scale",
-        "wave1-speed",
         "water-opacity",
         "specular-power",
         "water-texture-kuid",
@@ -291,6 +259,12 @@
         "blade-taper-length",
         "mesh-table-lod-transition-distances",
         "mousemode"
+      ],
+      "patterns": [
+        "camera[0-9]+",
+        "car[0-9]+",
+        "smoke[0-9]+",
+        "wave[0-9]+-(magnitude|scale|speed)"
       ]
     },
     {
@@ -313,8 +287,6 @@
         "textures",
         "chairs_left",
         "volume",
-        "lod0",
-        "lod1",
         "rail_right",
         "chairs_right",
         "rail_left",
@@ -322,7 +294,6 @@
         "motor",
         "throttle-power",
         "privileges",
-        "load0",
         "bogeys",
         "member-of-groups",
         "signals",
@@ -369,6 +340,10 @@
         "endcap-next",
         "track-sound",
         "endcap-prev"
+      ],
+      "patterns": [
+        "load[0-9]+",
+        "lod[0-9]+"
       ]
     },
     {
@@ -393,26 +368,7 @@
         "divider",
         "grounded",
         "uncached_alphas",
-        "category-era-0",
-        "category-era-1",
-        "category-era-2",
-        "category-era-3",
-        "category-era-4",
-        "category-era-5",
-        "category-era-6",
-        "category-region-0",
-        "category-region-1",
-        "category-region-2",
-        "category-region-3",
-        "category-region-4",
-        "category-region-5",
         "speedlimit",
-        "icon0",
-        "icon1",
-        "icon2",
-        "icon3",
-        "icon4",
-        "icon5",
         "initiator",
         "terminator",
         "car15",
@@ -422,6 +378,10 @@
         "car19",
         "car20",
         "rem"
+      ],
+      "patterns": [
+        "category-(era|region)-[0-9]+",
+        "icon[0-9]+"
       ]
     }
   ],

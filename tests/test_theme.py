@@ -97,6 +97,35 @@ def test_the_theme_that_comes_with_the_program_colours_words_and_strings():
     assert theme.style("keywords3").italic
 
 
+def test_the_shipped_theme_writes_a_family_of_tags_as_one_pattern():
+    """A Trainz asset numbers these as far as it likes - era 7, car 31, camera
+    12 - and the theme has to follow without anyone adding a line."""
+    theme = default_theme()
+    assert theme.keyword_style("category-era-42") == "keywords3"
+    assert theme.keyword_style("category-region-11") == "keywords3"
+    assert theme.keyword_style("car25") == "keywords1"
+    assert theme.keyword_style("camera12") == "keywords1"
+    assert theme.keyword_style("icon9") == "keywords3"
+    assert theme.keyword_style("wave7-speed") == "keywords1"
+    assert theme.keyword_style("lod4") == "keywords2"
+
+
+def test_the_shipped_theme_never_lists_a_tag_by_its_number():
+    """The families are one pattern each; the only numbered words left are the
+    cars coloured differently from the rest of their family on purpose."""
+    theme = default_theme()
+    listed = sorted(word for word in theme.words if any(digit in word for digit in "0123456789"))
+    assert listed == ["car15", "car16", "car17", "car18", "car19", "car20"]
+    assert theme.keyword_style("car17") == "keywords3"
+
+
+def test_the_shipped_theme_colours_a_tag_written_for_a_language():
+    theme = default_theme()
+    assert theme.language_suffixes
+    assert theme.keyword_style("description-ru") == "keywords1"
+    assert theme.keyword_style("username-de") == "keywords1"
+
+
 def test_the_bundled_theme_is_where_the_package_keeps_it():
     assert bundled_theme_path().is_file()
     assert bundled_theme_path().name == DEFAULT_THEME
@@ -298,6 +327,115 @@ def test_a_colour_the_theme_left_out_falls_back_to_plain_text():
     """The painter asks for a style by name, and a theme missing one says plain."""
     theme = parse_theme({"styles": {"default": "#123456"}})
     assert theme.style("anything").colour == "#123456"
+
+
+# ---------------------------------------------------------------------------
+# a family of words written as one pattern
+# ---------------------------------------------------------------------------
+
+FAMILY = """
+{
+  "name": "families",
+  "languageSuffixes": true,
+  "styles": {"default": "#000000", "words": "#0000ff", "other": "#800000"},
+  "keywords": [
+    {"style": "words", "words": ["description"],
+     "patterns": ["category-era-[0-9]+", "car[0-9]+"]},
+    {"style": "other", "words": ["car17"], "patterns": "icon[0-9]+"}
+  ]
+}
+"""
+
+
+def test_a_keyword_list_may_give_patterns_as_well_as_words():
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keywords[0].patterns == ("category-era-[0-9]+", "car[0-9]+")
+    assert theme.keywords[1].patterns == ("icon[0-9]+",)  # one pattern, written as a string
+
+
+def test_a_pattern_colours_a_word_the_theme_never_named():
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("category-era-42") == "words"
+    assert theme.keyword_style("car7") == "words"
+    assert theme.keyword_style("icon12345") == "other"
+
+
+def test_a_pattern_reaches_a_whole_word_and_no_part_of_one():
+    """The word is matched against the pattern rather than searched for in it,
+    so a pattern cannot colour a piece of something else."""
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("mycar1") is None
+    assert theme.keyword_style("car") is None
+    assert theme.keyword_style("category-era-x") is None
+
+
+def test_a_word_written_out_keeps_its_colour_against_a_pattern():
+    """Which is how one member of a family is picked out and coloured another
+    way, the way the shipped theme colours car15 to car20 differently."""
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("car17") == "other"
+    assert theme.keyword_style("car18") == "words"
+
+
+def test_a_theme_written_out_keeps_its_patterns(tmp_path):
+    theme = parse_theme(json.loads(FAMILY))
+    again = load_theme(save_theme(theme, tmp_path / "again.json"))
+    assert again.keywords[0].patterns == theme.keywords[0].patterns
+    assert again.keyword_style("car7") == "words"
+
+
+def test_a_theme_with_nothing_to_repeat_writes_nothing_out():
+    written = parse_theme(json.loads(SIMPLE)).to_json()
+    assert "patterns" not in written["keywords"][0]
+    assert "languageSuffixes" not in written
+
+
+def test_a_pattern_that_cannot_be_read_says_which_file(tmp_path):
+    path = written(tmp_path, FAMILY.replace("[0-9]+", "([0-9]+"))
+    with pytest.raises(ThemeError) as caught:
+        load_theme(path)
+    assert str(path) in str(caught.value)
+    assert "category-era-([0-9]+" in str(caught.value)
+
+
+def test_the_patterns_are_read_the_way_the_theme_counts_case():
+    counted = parse_theme(json.loads(FAMILY))
+    assert counted.keyword_style("CATEGORY-ERA-9") is None
+    loose = FAMILY.replace('"name": "families",', '"name": "families", "caseSensitive": false,')
+    theme = parse_theme(json.loads(loose))
+    assert theme.keyword_style("CATEGORY-ERA-9") == "words"
+    assert theme.keyword_style("DESCRIPTION-ru") == "words"
+
+
+# ---------------------------------------------------------------------------
+# the two letter tail that says which language a tag is written for
+# ---------------------------------------------------------------------------
+
+
+def test_a_language_suffix_borrows_the_colour_of_the_tag_it_follows():
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("description-ru") == "words"
+    assert theme.keyword_style("description-de") == "words"
+    assert theme.keyword_style("category-era-3-ro") == "words"
+
+
+def test_a_suffix_is_two_letters_and_neither_one_nor_three():
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("description-r") is None
+    assert theme.keyword_style("description-rus") is None
+    assert theme.keyword_style("description-russian") is None
+
+
+def test_a_suffix_cannot_invent_a_colour_for_a_tag_nobody_listed():
+    theme = parse_theme(json.loads(FAMILY))
+    assert theme.keyword_style("nonsense-ru") is None
+
+
+def test_a_theme_that_says_nothing_about_languages_leaves_a_local_tag_plain():
+    theme = parse_theme(json.loads(FAMILY.replace('"languageSuffixes": true,', "")))
+    assert theme.language_suffixes is False
+    assert theme.keyword_style("description-ru") is None
+    assert theme.keyword_style("description") == "words"
 
 
 # ---------------------------------------------------------------------------

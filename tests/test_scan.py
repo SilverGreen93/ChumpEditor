@@ -141,3 +141,65 @@ def test_a_pair_with_no_closing_string_covers_the_rest_of_the_line_only():
     assert found == [("kind", "words"), ("# not a kind", "note")]
     assert state == STATE_NONE
     assert colours("kind", theme, state)[0] == [("kind", "words")]
+
+
+# ---------------------------------------------------------------------------
+# a family of tags written as one pattern, and written for a language
+# ---------------------------------------------------------------------------
+
+FAMILY = """
+{
+  "name": "family scan",
+  "languageSuffixes": true,
+  "styles": {
+    "default": {"colour": "#000000"},
+    "words": {"colour": "#0000ff"},
+    "other": {"colour": "#800000"},
+    "text": {"colour": "#008000"}
+  },
+  "pairs": [{"style": "text", "open": "\\"", "close": "\\""}],
+  "keywords": [
+    {"style": "words", "words": ["description"],
+     "patterns": ["category-era-[0-9]+", "car[0-9]+"]},
+    {"style": "other", "words": ["car17"], "patterns": ["icon[0-9]+"]}
+  ]
+}
+"""
+
+
+@pytest.fixture
+def families() -> Theme:
+    return parse_theme(json.loads(FAMILY))
+
+
+def test_a_pattern_colours_a_tag_the_theme_never_named(families):
+    assert colours("category-era-9 {}", families)[0] == [("category-era-9", "words")]
+    assert colours("icon12", families)[0] == [("icon12", "other")]
+
+
+def test_a_pattern_never_colours_the_middle_of_a_word(families):
+    """The scanner hands over whole words and the pattern has to match all of
+    one, so nothing here has to say where a word stops."""
+    assert colours("mycar1 car1x acategory-era-9", families)[0] == []
+
+
+def test_a_tag_written_out_by_hand_wins_over_the_pattern_covering_it(families):
+    assert colours("car17 car18", families)[0] == [("car17", "other"), ("car18", "words")]
+
+
+def test_a_language_suffix_colours_a_tag_the_theme_never_named(families):
+    assert colours("description-ru description", families)[0] == [
+        ("description-ru", "words"),
+        ("description", "words"),
+    ]
+
+
+def test_a_tag_from_a_family_and_a_language_at_once(families):
+    assert colours("category-era-3-ro", families)[0] == [("category-era-3-ro", "words")]
+
+
+def test_a_family_tag_inside_a_value_is_part_of_the_value(families):
+    assert colours('description-ru "category-era-9"', families)[0] == [
+        ("description-ru", "words"),
+        ('"category-era-9"', "text"),
+    ]

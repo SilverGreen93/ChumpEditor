@@ -99,6 +99,7 @@ What gets coloured is a small JSON file, not something written into the program:
 {
   "name": "Trainz config",
   "caseSensitive": true,
+  "languageSuffixes": true,
   "styles": {
     "default":     {"colour": "#000000", "dark": "#ffffff"},
     "keywords1":   {"colour": "#0000ff", "dark": "#3fd0e0"},
@@ -106,7 +107,11 @@ What gets coloured is a small JSON file, not something written into the program:
     "delimiters1": "#008000"
   },
   "pairs":    [{"style": "delimiters1", "open": "\"", "close": "\""}],
-  "keywords": [{"style": "keywords1", "words": ["kind", "kuid"]}],
+  "keywords": [
+    {"style": "keywords1", "words": ["kind", "kuid"],
+     "patterns": ["camera[0-9]+", "car[0-9]+",
+                  "wave[0-9]+-(magnitude|scale|speed)"]}
+  ],
   "numbers":  null
 }
 ```
@@ -115,6 +120,21 @@ Add a word to a list or change a colour and the next line is coloured by it. A
 pair with an empty `close` colours the rest of the line it starts on, a pair left
 open at the end of a line carries on into the next one, and inside a pair the
 pair's own colour wins over any keyword.
+
+A list may give `patterns` instead of, or as well as, `words`: regular
+expressions tried against a whole word, never part of one. That is how a family
+of tags that Trainz numbers as far as it likes - `category-era-0`,
+`category-era-1`, and whatever an asset happens to carry - takes one line rather
+than one entry each. Spelled-out words are tried first, so one member of a
+family can still be picked out and coloured another way. They are ordinary
+Python regular expressions, and inside JSON a backslash has to be doubled, so
+`[0-9]+` is easier to read than `\\d+`.
+
+`languageSuffixes` (off unless it says `true`) colours a tag ending in a two
+letter language code as the tag it is written after: `description-ru` and
+`description-ro` take the colour of `description`. Only the shape of the tail is
+checked, because a list of every language code is not something to keep up to
+date; a tag with nothing to borrow its colour from stays plain.
 
 A style can also name a `dark` colour, which is what it becomes when the desktop
 is dark. Blue that is readable on white is nearly invisible on a dark editor, and
@@ -149,7 +169,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         301 tests
+tests/                         325 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

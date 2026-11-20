@@ -28,6 +28,7 @@ from chumpeditor.theme import bundled_theme_path, load_theme, parse_theme  # noq
 PLAIN = "#000000"
 WORDS = "#0000ff"
 OTHER = "#800000"
+FAMILY = "#ff0000"
 STRING = "#008000"
 SECTION = "#ff0080"
 
@@ -99,7 +100,14 @@ def painted(widget: RichTextEditor) -> list[list[tuple[str, str]]]:
 
 def shown(widget: RichTextEditor) -> list[list[tuple[str, str]]]:
     """The same, with the numbers replaced by the parts of the theme they came from."""
-    named = {PLAIN: "plain", WORDS: "words", OTHER: "other", STRING: "string", SECTION: "section"}
+    named = {
+        PLAIN: "plain",
+        WORDS: "words",
+        OTHER: "other",
+        FAMILY: "family",
+        STRING: "string",
+        SECTION: "section",
+    }
     return [
         [(text, named.get(colour, colour)) for text, colour in line]
         for line in painted(widget)
@@ -136,6 +144,20 @@ def test_the_two_lists_of_words_are_two_colours(editor):
     assert shown(editor) == [
         [("kuid-table", "other"), (" ", "plain"), ("kuid", "words")]
     ]
+
+
+def test_a_tag_numbered_past_the_ones_the_theme_lists_is_still_coloured(editor):
+    """The theme writes a family of tags as one pattern, so an asset's seventh
+    camera and its era 9 are coloured without anyone adding a line."""
+    editor.setPlainText("car25 category-era-9")
+    assert shown(editor) == [
+        [("car25", "words"), (" ", "plain"), ("category-era-9", "family")]
+    ]
+
+
+def test_a_tag_written_for_a_language_takes_the_colour_of_its_tag(editor):
+    editor.setPlainText("description-ru")
+    assert shown(editor) == [[("description-ru", "words")]]
 
 
 def test_a_section_in_angle_brackets_is_one_colour(editor):
