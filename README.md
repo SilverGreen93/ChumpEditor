@@ -2,12 +2,17 @@
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SilverGreen93/ChumpEditor)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) [![Downloads (Latest Release)](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/latest/total?label=latest%20release%20downloads)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/total?label=total%20downloads)
 
-Converts Trainz `.chump` files - the binary form of an asset's `config.txt` -
-to and from their readable text form.
+Editor for config.chump or config.txt files.
+
+Features:
+- Can convert Trainz `.chump` files - the binary form of an asset's `config.txt` - to and from their readable text form.
+- Can be used directly as an editor for config.txt/config.chump files
+- Contains tweaks to modernize obsolete config files (see below)
+- Offers syntax highlighting
 
 ![screenshot](assets/screenshot.png)
 
-The extension picks the direction: a `.chump` (or `.cdp`) is expanded into
+For CLI, the extension picks the direction: a `.chump` (or `.cdp`) is expanded into
 `.txt`, a `.txt` is packed back into `.chump`. The text that comes out is laid
 out the way Trainz writes it - UTF-8 with a BOM, CRLF line endings, values
 starting on column 40 - so a file you never touched comes back byte for byte.
@@ -83,6 +88,10 @@ looked like.
   binary chump is expanded for display and nothing is written until you save.
 - The title carries the file's name and a `*` while it has changes that are
   not on disk.
+- Work that is not on disk is asked about before anything replaces it - opening
+  a file, dropping one in, or quitting - with **Save**, **Discard** and
+  **Cancel**. Nothing is written unless you choose Save, and a Save that is
+  then talked out of stops the whole thing.
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
@@ -93,7 +102,9 @@ looked like.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
-### Convert obsolete lists
+### Tweaks
+
+#### Convert obsolete lists
 
 Older assets write a list as a run of numbered tags:
 
@@ -213,7 +224,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         356 tests
+tests/                         360 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)
@@ -299,14 +310,6 @@ a different type byte. Nothing in this repo's samples is `BINARY`, which is why
 the round-trip tests pass; if a `.chump` of yours has one, keep the original
 next to the text rather than deleting it. Everything else - containers, ints,
 floats, strings, nulls, kuids - survives.
-
-## Issues
-
-[github.com/SilverGreen93/ChumpEditor/issues](https://github.com/SilverGreen93/ChumpEditor/issues)
-
-## License
-
-GPL-3.0. See [LICENSE](LICENSE).
 
 ## Related software
 
