@@ -1141,6 +1141,19 @@ def test_an_unclosed_quote_stops_an_export_but_not_the_work(window, tmp_path, di
     assert window.editor.document().isModified()
 
 
+def test_a_quote_mark_with_no_partner_in_a_real_file_is_said(window, tmp_path, dialogs):
+    """Losing one closing quote is not caught by reading, only by pairing."""
+    source = copy("config2.txt", tmp_path)
+    before = source.read_bytes()
+    window.open_path(source)
+    replace(window, text_of(window.editor).replace('"interior"', '"interior'))
+
+    assert window.save() is None
+    assert dialogs[-1][0] == "error"
+    assert "line 2: quoted value for tag 'kind' has a quote mark with no partner" in dialogs[-1][2]
+    assert source.read_bytes() == before
+
+
 def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path):
     source = copy("config1.chump", tmp_path)
     window.open_path(source)

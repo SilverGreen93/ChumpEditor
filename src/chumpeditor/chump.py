@@ -732,26 +732,33 @@ def check_text(text: str) -> Tag:
     ``parse_text`` understands the layout of a chump text file and stops at a
     container whose ``{`` / ``}`` pair is missing one half.  What it cannot see
     is a quote or a ``<`` / ``>`` pair broken by hand, because a broken pair
-    looks like ordinary text:
+    looks like ordinary text.  So each line is looked at first, and a quote mark
+    has to have its partner:
 
-    * a quoted value with no line closing it is refused - it would swallow
-      every line that follows, including the ``}`` of a container.  A value may
-      span lines, so a quote on a later line does close a run even where that
-      was not the plan; where a value ends stays the parser's judgement, and
-      this walk reports the case with no closing quote at all;
-    * a quote mark loose in a value that does not start with a quote is
-      refused: that value reads as plain text now, and the next render writes
+    * a quoted value whose quote marks do not come in twos is refused.  The
+      reader takes the value from the first quote to the last one, so a loose
+      mark either moves the end of a value into the middle of the line - ``k
+      "a" b"`` reads back as ``a" b`` - or swallows as much of what follows as
+      it takes to find an even number: a ``kind "interior`` missing its closing
+      quote runs on through the next tags and ends at the quote that was meant
+      to open the tag after it;
+    * a quote mark loose in a value that does not start with a quote is refused
+      as well: that value reads as plain text now, and the next render writes
       it with a quote in front, which is a different value;
+    * a quote mark in a tag name is refused, because a name is never quoted and
+      has no partner for it either;
     * an angle bracket with no partner in a value that is not wrapped in quotes
       is refused, because it leaves a kuid half written - ``<kuid:1:2`` and
       ``kuid:1:2>`` both read back as text without the brackets that make a
       kuid a kuid.
 
-    Inside quotes a value is a string and stays one whatever it holds, so a
-    quote or a bracket in a license string, or in the part of one that runs
-    over from the line before, is prose and is left alone.  The walk follows the
-    same lines as ``_parse_lines`` and reads each line before the parser turns
-    it into tags, which is what lets it name the line at fault.
+    Quotes that do come in twos are taken at face value, however odd they look:
+    a value holding ``say ""hi""`` is a string and stays one, and a bracket in
+    a license string is prose.  A value whose run never reaches a closing quote
+    at all is left to the parser, which says so with the line the value started
+    on.  The walk follows the same lines as ``_parse_lines`` and reads each line
+    before the parser turns it into tags, which is what lets it name the line at
+    fault.
     """
     lines = text.splitlines()
     index, size = 0, len(lines)
@@ -761,19 +768,26 @@ def check_text(text: str) -> Tag:
         if not line:
             continue
         name, rest = _split_name(line)
+        if '"' in name:
+            raise ChumpError(f"line {index}: tag name '{name}' has a quote mark in it")
         if not rest:
             continue
         if rest.startswith('"'):
             if len(rest) > 1 and rest.endswith('"'):  # a one line string
+                _check_pairs(name, index, rest.count('"'))
                 continue
-            # a value running over the lines that follow, left to the parser:
-            # it reads the whole run, and it is the one that says when a value
-            # never got the quote that should have closed it
+            # a value running over the lines that follow, to the line that ends
+            # with a quote: its marks have to pair up over the whole run
+            opened_on, marks, closed = index, rest.count('"'), False
             while index < size:
+                marks += lines[index].count('"')
                 if lines[index].endswith('"'):
+                    closed = True
                     index += 1  # past the line that closed the value
                     break
                 index += 1
+            if closed:  # otherwise the parser has the better message
+                _check_pairs(name, opened_on, marks)
             continue
         if '"' in rest:
             raise ChumpError(
@@ -782,6 +796,15 @@ def check_text(text: str) -> Tag:
             )
         _check_brackets(name, index, rest)
     return parse_text(text)
+
+
+def _check_pairs(name: str, index: int, marks: int) -> None:
+    """Complain about a quoted value whose quote marks do not come in twos."""
+    if marks % 2:
+        raise ChumpError(
+            f"line {index}: quoted value for tag '{name}' has a quote mark with "
+            "no partner"
+        )
 
 
 def _check_brackets(name: str, index: int, value: str) -> None:

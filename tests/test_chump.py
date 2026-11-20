@@ -853,16 +853,36 @@ def test_an_unquoted_value_may_hold_a_pair_of_angle_brackets():
 
 
 def test_a_value_spanning_lines_says_what_it_likes():
-    """A license string holds quotes and brackets; only its own quotes count."""
+    """A license string holds brackets and quotes; the run's marks pair up."""
     text = (
         'license "a < b and a > sign\n'
-        'and a quote " inside\n'
+        'and a "quoted" word here\n'
         'and an unclosed bracket <"\n'
         'name "ok"\n'
     )
     tags = check_text(text).tags
-    assert tags[0].value == 'a < b and a > sign\nand a quote " inside\nand an unclosed bracket <'
+    assert tags[0].value == (
+        'a < b and a > sign\nand a "quoted" word here\nand an unclosed bracket <'
+    )
     assert [tag.name for tag in tags] == ["license", "name"]
+
+
+def test_a_quote_mark_with_no_partner_on_one_line_is_reported():
+    with pytest.raises(ChumpError, match=r"line 1: quoted value for tag 'k' has a quote mark "
+                                         "with no partner"):
+        check_text('k "a" b"\n')
+
+
+def test_a_missing_closing_quote_that_eats_the_next_tag_is_reported():
+    """The usual slip: the run goes on until a later value's quote closes it."""
+    with pytest.raises(ChumpError, match=r"line 1: quoted value for tag 'kind' has a quote mark "
+                                         "with no partner"):
+        check_text('kind "interior\nkuid <kuid:1:2>\nname "bob"\n')
+
+
+def test_a_quote_mark_in_a_tag_name_is_reported():
+    with pytest.raises(ChumpError, match=r"line 2: tag name 'kind\"' has a quote mark in it"):
+        check_text('k 1\nkind" 2\n')
 
 
 def test_the_sample_text_files_pass_the_check():

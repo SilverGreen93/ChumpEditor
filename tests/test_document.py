@@ -150,6 +150,18 @@ def test_exporting_a_broken_bracket_pair_is_refused(tmp_path):
     assert not (tmp_path / "brackets.txt").exists()
 
 
+def test_a_lost_closing_quote_that_eats_the_next_tag_is_refused(tmp_path):
+    """The value runs on to the quote of a later tag; both writes say so."""
+    text = read_document(copy("config2.txt", tmp_path)).replace('"interior"', '"interior')
+    for write, name in ((save_chump, "swallowed.chump"), (save_text, "swallowed.txt")):
+        with pytest.raises(ChumpError) as exc:
+            write(text, tmp_path / name)
+        assert "line 2: quoted value for tag 'kind' has a quote mark with no partner" in str(
+            exc.value
+        )
+        assert not (tmp_path / name).exists()
+
+
 def test_a_value_spanning_lines_comes_back_with_the_formats_own_endings(tmp_path):
     """The editor holds LF; the format writes CRLF, and so does a save.
 

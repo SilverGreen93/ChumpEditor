@@ -104,12 +104,14 @@ looked like.
   to this repository.
 
 Neither Save nor Export writes a file the format would refuse. The text on screen
-is read first, and a container whose `{` / `}` pair is missing a half, a value
-that never gets its closing quote, a quote mark loose in a value that does not
-start with one, or half a kuid - `<kuid:1:2` or `kuid:1:2>` - is named with its
-line number instead of going to disk. Quotes and brackets inside a quoted value,
-or inside the part of a value that runs over from the line before, belong to that
-value and are left alone.
+is read and checked first: a container whose `{` / `}` pair is missing a half,
+quote marks that do not come in twos, a quote mark in a tag name, and half a kuid
+(`<kuid:1:2` or `kuid:1:2>`) are named with their line number instead of going to
+disk. The quote pairing is the part that reading alone cannot catch: a
+`kind "interior` that lost its closing quote runs on through the tags after it and
+stops at the quote meant to open the next value, so the file still reads - it just
+reads as one long value instead of several. Inside a quoted value the marks still
+have to pair up; a bracket in a license string is only prose.
 
 ### Tweaks
 
@@ -291,7 +293,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         428 tests
+tests/                         433 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)
