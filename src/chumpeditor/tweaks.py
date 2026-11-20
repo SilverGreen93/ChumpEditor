@@ -7,18 +7,21 @@ list now as one tag with the elements between semicolons:
 it never decides on its own that a file needs fixing, and it leaves a tag alone
 the moment it is not sure about it.
 
-A tag is folded up only when
+A numbered tag is changed only when
 
-* two or more of them stand on neighbouring lines under the same name, with a
-  dash and a number on the end - one tag on its own is not a list, and ``load0``
-  or ``camera0`` standing alone means something else entirely;
-* every one of them holds a quoted value on its own line, so a kuid, a number or
-  a value running over several lines is not touched;
+* it stands on its own line with a dash and a number on the end and holds a
+  quoted value, so a kuid, a number or a value running over several lines is not
+  touched - ``load0`` and ``camera0`` carry no dash, and mean something else
+  entirely;
+* the neighbours written under the same name can be read with it.  A run of them
+  becomes one tag whose values sit between semicolons; one standing on its own
+  keeps the value it has and only loses the number, because a list of one is
+  still written as a single tag;
 * none of the values holds a semicolon itself, which would read as two
   elements once they are joined up;
-* the plain name is not already used by a tag with a value, and no other group
-  would make the same name, either of which would leave the file holding the
-  same tag twice.
+* the plain name is not already used by a tag with a value, and no group of the
+  same tags has already taken that name, either of which would leave the file
+  holding the same tag twice.
 
 Anything that is looked at and turned down is said out loud in the summary
 rather than passed over in silence.
@@ -65,7 +68,7 @@ class Rewrite:
 
 @dataclass(frozen=True)
 class Conversion:
-    """One list that was folded up."""
+    """One tag, or run of numbered tags, that was changed."""
 
     #: the tag it has become: category-era
     tag: str
@@ -94,7 +97,7 @@ class Tweaks:
     rewrites: tuple[Rewrite, ...]
     #: what each of those edits did
     conversions: tuple[Conversion, ...]
-    #: groups that looked like a list but were left alone, and why
+    #: numbered tags that were looked at and turned down, and why
     skipped: tuple[str, ...]
 
     def summary(self) -> str:
@@ -105,9 +108,9 @@ class Tweaks:
             parts.append(f"{self.status}:\n\n{listed}")
         else:
             parts.append(
-                "Nothing was converted.  Tags are folded up only when two or more "
-                "of them with a number on the end stand on neighbouring lines and "
-                "each holds a quoted value."
+                "Nothing was converted.  A tag with a number on the end is only "
+                "changed when it stands on a line of its own holding a quoted "
+                "value, and the shorter name is not already used."
             )
         for note in self.skipped:
             parts.append(f"Left alone: {note}.")
@@ -119,57 +122,56 @@ class Tweaks:
         count = len(self.conversions)
         if not count:
             return "Nothing was converted"
-        return f"Converted {count} obsolete {'list' if count == 1 else 'lists'}"
+        return f"Converted {count} obsolete {'tag' if count == 1 else 'tags'}"
 
 
 def convert_obsolete_lists(text: str) -> Tweaks:
-    """Fold ``tag-0``, ``tag-1`` and the rest into one ``tag "a;b;c"``."""
+    """Fold ``tag-0``, ``tag-1`` and the rest into one ``tag "a;b;c"``.
+
+    A run of them makes one list; one standing on its own keeps the value it has
+    and only loses the number on the end, because a list of one is still written
+    as a single tag.
+    """
     lines, eol = _split(text)
     runs = _runs_of_numbered_tags(lines)
     taken = _names_already_in_use(lines, runs)
-    doubled = _names_made_twice(runs)
 
-    conversions: list[Conversion] = []
-    rewrites: list[Rewrite] = []
-    skipped: list[str] = []
-    for run in runs:
-        if len(run.members) < 2:
-            continue
-        reason = _turned_down_because(run, taken, doubled)
+    changes: list[tuple[Rewrite, Conversion]] = []
+    notes: list[tuple[int, str]] = []
+    # which group of tags has already had each shorter name given to it
+    owners: dict[str, _Run] = {}
+
+    # a run of two or more is a list beyond doubt, so it is served first and a
+    # lone tag gives way to it; past that the order of the file decides, which
+    # keeps the whole thing reproducible instead of a matter of chance
+    for run in sorted(runs, key=lambda group: len(group.members), reverse=True):
+        reason = _turned_down_because(run, taken, owners)
         if reason:
-            skipped.append(f"{_names(run)} {reason}")
+            notes.append((run.members[0].line, f"{_names(run)} {reason}"))
             continue
+        owners[run.tag] = run
         members = sorted(run.members, key=lambda member: (member.number, member.line))
-        conversions.append(
-            Conversion(
-                tag=run.tag,
-                sources=tuple(member.tag for member in members),
-                values=tuple(member.value for member in members),
-            )
-        )
         # the stretch is the lines as they were written, even when the numbers
         # on them were not
-        rewrites.append(
+        changes.append((
             Rewrite(
                 start=_start_of(lines, eol, run.members[0].line),
                 end=_end_of(lines, eol, run.members[-1].line),
                 text=_merged(run, members),
-            )
-        )
+            ),
+            Conversion(
+                tag=run.tag,
+                sources=tuple(member.tag for member in members),
+                values=tuple(member.value for member in members),
+            ),
+        ))
 
-    # a numbered tag the run broke off from, one element left stranded
-    folded = {conversion.tag for conversion in conversions}
-    for run in runs:
-        if len(run.members) == 1 and run.tag in folded:
-            stranded = run.members[0].tag
-            skipped.append(f"{stranded} stands apart from the rest and stays as it is")
-
-    rewrites.sort(key=lambda rewrite: rewrite.start)
+    changes.sort(key=lambda change: change[0].start)
     return Tweaks(
-        text=_apply(text, rewrites),
-        rewrites=tuple(rewrites),
-        conversions=tuple(conversions),
-        skipped=tuple(skipped),
+        text=_apply(text, [change[0] for change in changes]),
+        rewrites=tuple(change[0] for change in changes),
+        conversions=tuple(change[1] for change in changes),
+        skipped=tuple(note for _line, note in sorted(notes)),
     )
 
 
@@ -253,16 +255,6 @@ def _continues(run: _Run | None, base: str, indent: str, line: int) -> bool:
     )
 
 
-def _names_made_twice(runs: list[_Run]) -> set[str]:
-    """The names two or more groups would each make.
-
-    One tag called ``category-era`` is what a list is; two of them in the same
-    body is a file nobody can read, so neither group is touched.
-    """
-    names = [run.tag for run in runs if len(run.members) > 1]
-    return {name for name in names if names.count(name) > 1}
-
-
 def _opens_a_running_value(line: str) -> bool:
     """Whether this line starts a quoted value that carries on below it.
 
@@ -274,18 +266,21 @@ def _opens_a_running_value(line: str) -> bool:
     return rest.startswith('"') and not (len(rest) > 1 and rest.endswith('"'))
 
 
-def _turned_down_because(run: _Run, taken: set[str], doubled: set[str]) -> str:
-    """Why this group is left as it is, in a clause, or nothing at all.
+def _turned_down_because(run: _Run, taken: set[str], owners: dict[str, _Run]) -> str:
+    """Why these tags are left as they are, in a clause, or nothing at all.
 
-    Saying the reason is the point of the sentence: a group that was passed over
-    for a good reason looks exactly like one that was missed, and the person
-    looking at the file cannot tell the two apart.
+    Saying the reason is the point of the sentence: tags that were passed over
+    for a good reason look exactly like tags that were missed, and the person
+    reading the file afterwards cannot tell the two apart.
     """
     if run.tag in taken:
         return f"would repeat {run.tag}, which the file already has"
-    if run.tag in doubled:
-        return f"would repeat {run.tag}, which another group would make"
-    if any(";" in member.value for member in run.members):
+    if run.tag in owners:
+        # the name has gone to a bigger run of the same tags, or to the ones
+        # written above these; either way a second tag of that name would be a
+        # file nobody can read
+        return f"would repeat {run.tag}, which {_names(owners[run.tag])} became"
+    if len(run.members) > 1 and any(";" in member.value for member in run.members):
         return "holds a ';' in a value, which would read as two"
     return ""
 

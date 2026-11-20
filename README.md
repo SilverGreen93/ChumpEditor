@@ -111,16 +111,28 @@ category-era                          "1920s;1930s;1940s"
 
 **Tweaks > Convert obsolete lists** makes that change for every group in the text
 on screen, keeps the values in the order the numbers say and the columns where
-they stood, and ends with a message naming every group it folded up and every one
-it left alone. One press of Undo takes the whole change back.
+they stood, and ends with a message naming every tag it changed and every one it
+left alone, with the reason. One press of Undo takes the whole change back.
 
-A group is folded up only when the rules are sure of it: two or more tags with
-`-number` on the end standing on neighbouring lines at the same indent, each
-holding a quoted value on its own line, none of the values holding a `;`, and
-nothing else in the file already answering to the plain name. A lone
-`category-region-0`, a `load0` or `camera0`, a value running over several lines
-and a name already in use are all left exactly as they were, and named in the
-message as something left alone.
+A tag with `-number` on the end is changed when it stands on a line of its own
+holding a quoted value. A run of them at one indent becomes one tag with the
+values between semicolons; one standing on its own keeps its value and only loses
+the number, because a list of one is still written as a single tag:
+
+```
+category-region-0                       "SE"
+```
+
+becomes
+
+```
+category-region                         "SE"
+```
+
+Nothing is touched when a value holds a `;` itself, or when the file already has
+a tag of the plain name, or when another group of the same tags took that name
+first - those are listed as left alone, with the reason. A `load0` or `camera0`
+carries no dash, means something else entirely, and is never touched.
 
 ### Colour themes
 
@@ -201,7 +213,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         352 tests
+tests/                         356 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

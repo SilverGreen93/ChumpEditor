@@ -597,7 +597,7 @@ def test_converting_folds_the_tags_into_one_line(window, dialogs):
         for line in (
             lined("kind", '"interior"'),
             lined("category-era", '"1920s;1930s;1940s"'),
-            lined("category-region-0", '"RO"'),
+            lined("category-region", '"RO"'),
         )
     )
 
@@ -609,11 +609,12 @@ def test_converting_tells_the_user_what_it_did(window, dialogs):
 
     kind, title, text = dialogs[-1]
     assert (kind, title) == ("info", "Convert obsolete lists")
-    assert "Converted 1 obsolete list" in text
+    assert "Converted 2 obsolete tags" in text
     for tag in ("category-era-0", "category-era-2", "category-era"):
         assert tag in text
-    assert "category-region-0" not in text  # one tag on its own is not a list
-    assert window._message == "Converted 1 obsolete list"
+    # the lone region tag is named as well: it lost its number
+    assert "category-region-0 became category-region 'RO'" in text
+    assert window._message == "Converted 2 obsolete tags"
 
 
 def test_one_press_of_undo_takes_the_whole_conversion_back(window, dialogs):
@@ -673,14 +674,14 @@ def test_the_obsolete_sample_converts_in_the_window_and_still_reads(window, dial
     after = window.editor.toPlainText()
     eras = '"1920s;1930s;1940s;1950s;1960s;1970s;1980s;1990s;2000s"'
     assert lined("category-era", eras) in after
-    assert lined("category-region-0", '"SE"') in after
+    assert lined("category-region", '"SE"') in after
     assert len(after.split("\n")) == len(before.split("\n")) - 8
     assert "Left alone" not in dialogs[-1][2]
 
     names = [tag.name for tag in parse_text(after).tags]
     assert names.count("category-era") == 1
     assert "category-era-0" not in names
-    assert "category-region-0" in names
+    assert names.count("category-region") == 1
 
 
 # ---------------------------------------------------------------------------

@@ -78,30 +78,53 @@ def test_the_rest_of_the_text_is_left_exactly_as_it_was():
 
 
 # ---------------------------------------------------------------------------
+# a tag standing on its own
+# ---------------------------------------------------------------------------
+def test_a_tag_on_its_own_keeps_its_value_and_loses_the_number():
+    """A list of one is written as one tag, so there is nothing to join up."""
+    text = 'category-region-0 "SE"\nkind "interior"\n'
+    assert folded(text) == 'category-region   "SE"\nkind "interior"\n'
+    assert said(text) == (
+        "Converted 1 obsolete tag:\n"
+        "\n"
+        "  category-region-0 became category-region 'SE'"
+    )
+
+
+def test_a_name_that_ends_in_a_digit_without_a_dash_is_left_alone():
+    """load0 is a tag called load0; only the dash marks the old numbered tags."""
+    assert folded('load0 "5"\n') == 'load0 "5"\n'
+
+
+def test_a_lone_tag_gives_way_to_a_list_of_the_same_name_below_it():
+    """The run of two is a list beyond doubt; the odd tag out waits its turn."""
+    text = 'era-0 "a"\nkind "x"\nera-1 "b"\nera-2 "c"\n'
+    assert folded(text) == 'era-0 "a"\nkind "x"\nera   "b;c"\n'
+    assert "era-0 would repeat era, which era-1, era-2 became" in said(text)
+
+
+# ---------------------------------------------------------------------------
 # what is turned down, and the words about it
 # ---------------------------------------------------------------------------
-def test_a_tag_on_its_own_is_not_a_list():
-    text = 'category-region-0 "SE"\nkind "interior"\n'
-    assert folded(text) == text
-    assert said(text).startswith("Nothing was converted")
-
-
 def test_only_neighbouring_lines_make_one_list():
     """Anything between two of them means two groups, and no guess is made."""
     text = 'era-0 "a"\nera-1 "b"\nkind "interior"\nera-2 "c"\n'
     assert folded(text) == 'era   "a;b"\nkind "interior"\nera-2 "c"\n'
-    assert "era-2 stands apart" in said(text)
+    assert "era-2 would repeat era, which era-0, era-1 became" in said(text)
 
 
 def test_a_numbered_tag_at_a_different_indent_is_a_different_list():
+    """Two of a name in different places are two tags, and only one is renamed."""
     text = 'era-0 "a"\n  era-1 "b"\n'
-    assert folded(text) == text
+    assert folded(text) == 'era   "a"\n  era-1 "b"\n'
+    assert "era-1 would repeat era, which era-0 became" in said(text)
 
 
 def test_a_value_that_is_not_a_quoted_one_breaks_the_run():
     """A kuid, a number and an empty value are not elements of a list."""
     text = 'era-0 <kuid:1:2>\nera-1 "b"\nera-2 3\nera-3 ""\nera-4 "c"\n'
-    assert folded(text) == text
+    assert folded(text) == 'era-0 <kuid:1:2>\nera   "b"\nera-2 3\nera-3 ""\nera-4 "c"\n'
+    assert "era-4 would repeat era, which era-1 became" in said(text)
 
 
 def test_a_value_running_over_several_lines_is_not_touched():
@@ -121,10 +144,18 @@ def test_a_name_the_file_already_has_stops_the_group():
     assert "era-0, era-1 would repeat era" in said(text)
 
 
-def test_two_groups_that_would_make_the_same_name_are_both_left_alone():
-    text = 'era-0 "a"\nera-1 "b"\nkind "interior"\nera-2 "c"\nera-3 "d"\n'
+def test_a_name_the_file_already_has_stops_a_lone_tag_too():
+    text = 'era "1900s"\nera-0 "1920s"\n'
     assert folded(text) == text
-    assert said(text).count("would repeat era") == 2
+    assert "era-0 would repeat era, which the file already has" in said(text)
+
+
+def test_the_first_tags_of_a_name_take_it_and_the_rest_are_left_alone():
+    """Two groups would both be called era; a file with two is not a file."""
+    text = 'era-0 "a"\nera-1 "b"\nkind "interior"\nera-2 "c"\nera-3 "d"\n'
+    assert folded(text) == 'era   "a;b"\nkind "interior"\nera-2 "c"\nera-3 "d"\n'
+    assert said(text).count("would repeat era") == 1
+    assert "era-2, era-3 would repeat era, which era-0, era-1 became" in said(text)
 
 
 def test_a_value_holding_a_semicolon_is_left_alone():
@@ -132,6 +163,8 @@ def test_a_value_holding_a_semicolon_is_left_alone():
     text = 'era-0 "a;b"\nera-1 "c"\n'
     assert folded(text) == text
     assert "holds a ';' in a value" in said(text)
+    # one tag on its own has nothing to join up, so its value cannot be misread
+    assert folded('era-0 "a;b"\n') == 'era   "a;b"\n'
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +191,17 @@ def test_the_rewrites_add_up_to_the_new_text():
     assert manual == result.text
 
 
+def test_a_lone_tag_is_one_rewrite_too():
+    """The editor wants places in the text, whatever the tag became."""
+    result = tweaks.convert_obsolete_lists('kind "interior"\nregion-0 "RO"\n')
+    assert len(result.rewrites) == 1
+    rewrite = result.rewrites[0]
+    assert rewrite.text == 'region   "RO"'
+    assert result.text[: rewrite.start] + rewrite.text + result.text[rewrite.end :] == (
+        'kind "interior"\nregion   "RO"\n'
+    )
+
+
 def test_a_text_file_written_with_crlf_comes_back_with_crlf():
     text = 'era-0 "a"\r\nera-1 "b"\r\n'
     result = tweaks.convert_obsolete_lists(text)
@@ -168,9 +212,9 @@ def test_a_text_file_written_with_crlf_comes_back_with_crlf():
 def test_the_summary_lists_every_tag_that_was_converted():
     text = 'era-0 "a"\nera-1 "b"\ncar-2 "x"\ncar-3 "y"\n'
     result = tweaks.convert_obsolete_lists(text)
-    assert result.status == "Converted 2 obsolete lists"
+    assert result.status == "Converted 2 obsolete tags"
     assert result.summary() == (
-        "Converted 2 obsolete lists:\n"
+        "Converted 2 obsolete tags:\n"
         "\n"
         "  era-0, era-1 became era 'a;b'\n"
         "  car-2, car-3 became car 'x;y'"
@@ -181,25 +225,28 @@ def test_the_summary_of_a_file_with_nothing_to_convert_says_so():
     result = tweaks.convert_obsolete_lists('kind "interior"\n')
     assert result.status == "Nothing was converted"
     assert result.summary().startswith("Nothing was converted")
-    assert result.summary().endswith("each holds a quoted value.")
+    assert result.summary().endswith("the shorter name is not already used.")
 
 
 # ---------------------------------------------------------------------------
 # the file this was asked for
 # ---------------------------------------------------------------------------
 def test_the_obsolete_config_from_a_real_asset():
-    """Nine era tags fold up; a lone region tag and a long license do not."""
+    """Nine era tags fold up, a lone region tag loses its number, and the
+    long license string is left exactly as it was."""
     text = read_text_file(SAMPLES / "obsolete_config.txt")
     result = tweaks.convert_obsolete_lists(text)
 
     assert [str(item) for item in result.conversions] == [
+        "category-region-0 became category-region 'SE'",
         "category-era-0, category-era-1, category-era-2, category-era-3, "
         "category-era-4, category-era-5, category-era-6, category-era-7, "
         "category-era-8 became category-era "
-        "'1920s;1930s;1940s;1950s;1960s;1970s;1980s;1990s;2000s'"
+        "'1920s;1930s;1940s;1950s;1960s;1970s;1980s;1990s;2000s'",
     ]
     assert result.skipped == ()
-    assert 'category-region-0                       "SE"' in result.text
+    assert 'category-region                         "SE"' in result.text
+    assert 'category-region-0' not in result.text
     assert 'description-ru                          "Прохожая3"' in result.text
 
     lines_before = text.split("\r\n")
@@ -211,14 +258,19 @@ def test_the_obsolete_config_from_a_real_asset():
     ]
 
     # the fold is only a change of spelling: the file still reads, everything
-    # that was not an era is still there in the same order, and the nine values
-    # are the one value
+    # that was not one of the numbered tags is still there in the same order,
+    # and the nine era values are the one value
     before, after = parse_text(text), parse_text(result.text)
+    named = {
+        "category-region-0",
+        *(f"category-era-{number}" for number in range(9)),
+    }
     names_before = [tag.name for tag in before.tags]
     names_after = [tag.name for tag in after.tags]
-    assert [name for name in names_before if not name.startswith("category-era-")] == [
-        name for name in names_after if name != "category-era"
+    assert [name for name in names_before if name not in named] == [
+        name for name in names_after if name not in {"category-region", "category-era"}
     ]
+    assert [tag.value for tag in after.tags if tag.name == "category-region"] == ["SE"]
     assert [tag.value for tag in after.tags if tag.name == "category-era"] == [
         ";".join(tag.value for tag in before.tags if tag.name.startswith("category-era-"))
     ]
