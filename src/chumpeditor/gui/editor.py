@@ -10,8 +10,8 @@ text came from is the window's business, not this widget's.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase
+from PyQt6.QtCore import QEvent, pyqtSignal
+from PyQt6.QtGui import QFont, QFontDatabase, QPalette
 from PyQt6.QtWidgets import QTextEdit
 
 from ..theme import Theme, default_theme
@@ -60,7 +60,31 @@ class RichTextEditor(QTextEdit):
         self.setFont(code_font())
         self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
         self.setAcceptDrops(True)  # a file lands here as often as on the frame
-        self.highlighter = ThemeHighlighter(self.document(), theme or default_theme())
+        self.highlighter = ThemeHighlighter(
+            self.document(), theme or default_theme(), self.on_dark_background()
+        )
+
+    def on_dark_background(self) -> bool:
+        """Whether this text sits on a dark background.
+
+        The widget's own base colour is the question and the answer, not what
+        the desktop claims: a program handed a light palette by hand has to be
+        read with the light colours even on a dark desktop, and the base colour
+        is exactly what is painted behind the text.
+        """
+        return self.palette().color(QPalette.ColorRole.Base).lightness() < 128
+
+    def changeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Recolour when the palette changes, which is how a desktop going dark
+        - or coming back to light - reaches the keyword colours.
+
+        The events start before the highlighter does, since building the widget
+        polishes its palette, so there may be nothing to recolour yet.
+        """
+        super().changeEvent(event)
+        highlighter = getattr(self, "highlighter", None)
+        if highlighter is not None and event.type() == QEvent.Type.PaletteChange:
+            highlighter.set_dark(self.on_dark_background())
 
     def set_theme(self, theme: Theme) -> None:
         """Change the colours, and put the new ones over the text."""

@@ -48,6 +48,29 @@ def written(tmp_path: Path, text: str, name: str = "t.json") -> Path:
     return target
 
 
+#: what a dark theme paints behind the text, and the two functions that say
+#: whether a colour can actually be seen on it - the same contrast ratio WCAG
+#: uses, so the number can be looked up rather than trusted
+DARK_BACKGROUND = "#2d2d2d"
+
+
+def luminance(colour: str) -> float:
+    """How much light a colour gives off: 0 for black, 1 for white."""
+
+    def part(offset: int) -> float:
+        value = int(colour[offset:offset + 2], 16) / 255
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * part(1) + 0.7152 * part(3) + 0.0722 * part(5)
+
+
+def contrast(one: str, other: str) -> float:
+    """How far apart two colours are to an eye: 1 for the same, 21 for black on
+    white."""
+    light, dark = sorted((luminance(one), luminance(other)), reverse=True)
+    return (light + 0.05) / (dark + 0.05)
+
+
 # ---------------------------------------------------------------------------
 # the theme that comes with the program
 # ---------------------------------------------------------------------------
@@ -275,3 +298,77 @@ def test_a_colour_the_theme_left_out_falls_back_to_plain_text():
     """The painter asks for a style by name, and a theme missing one says plain."""
     theme = parse_theme({"styles": {"default": "#123456"}})
     assert theme.style("anything").colour == "#123456"
+
+
+# ---------------------------------------------------------------------------
+# the second colour, for text on a dark background
+# ---------------------------------------------------------------------------
+
+
+def test_a_style_may_name_a_second_colour_for_a_dark_background():
+    theme = parse_theme(
+        {
+            "styles": {
+                "default": {"colour": "#000000", "dark": "#ffffff"},
+                "words": {"colour": "#0000ff", "dark": "#3fd0e0"},
+            },
+            "keywords": [{"style": "words", "words": ["kind"]}],
+        }
+    )
+    assert theme.styles["words"].dark == "#3fd0e0"
+    assert theme.styles["words"].colour_for(False) == "#0000ff"
+    assert theme.styles["words"].colour_for(True) == "#3fd0e0"
+    assert theme.styles["default"].colour_for(True) == "#ffffff"
+
+
+def test_a_style_that_names_no_dark_colour_is_painted_the_same_either_way():
+    style = Style(name="words", colour="#0000ff")
+    assert style.dark is None
+    assert style.colour_for(True) == style.colour_for(False) == "#0000ff"
+
+
+def test_a_dark_colour_is_a_colour_like_any_other(tmp_path):
+    with pytest.raises(ThemeError, match="banana"):
+        load_theme(
+            written(
+                tmp_path,
+                '{"styles": {"default": {"colour": "#000", "dark": "banana"}}}',
+            )
+        )
+
+
+def test_a_theme_written_out_keeps_the_dark_colours(tmp_path):
+    theme = parse_theme(
+        {"styles": {"default": {"colour": "#000000", "dark": "#ffffff"}}}
+    )
+    target = save_theme(theme, tmp_path / "t.json")
+    assert json.loads(target.read_text(encoding="utf-8"))["styles"]["default"]["dark"] == "#ffffff"
+    assert load_theme(target) == theme
+
+
+def test_a_theme_that_never_mentions_dark_mode_stays_that_way(tmp_path):
+    """Nothing is invented on the way out; a style with one colour is written
+    with one colour."""
+    theme = load_theme(written(tmp_path, SIMPLE))
+    target = save_theme(theme, tmp_path / "again" / "t.json")
+    assert "dark" not in json.loads(target.read_text(encoding="utf-8"))["styles"]["words"]
+
+
+def test_the_shipped_theme_can_be_read_on_a_dark_background():
+    """The program cannot know what the desktop looks like, so every style of
+    the theme it ships has to say what it becomes on a dark one."""
+    theme = default_theme()
+    missing = [name for name, style in theme.styles.items() if not style.dark]
+    assert not missing, f"no dark colour: {missing}"
+
+
+def test_the_dark_colours_of_the_shipped_theme_stand_out_on_a_dark_background():
+    """The point of the second colour is that it can be seen, so the one that
+    ships is checked against the background it is meant for.
+
+    The ratio is the one WCAG calls acceptable for body text (4.5), and the
+    background is what a dark theme paints behind a text edit.
+    """
+    for name, style in default_theme().styles.items():
+        ratio = contrast(style.dark, DARK_BACKGROUND)
+        assert ratio >= 4.5, f"{name}: {style.dark} on {DARK_BACKGROUND} is only {ratio:.1f}"

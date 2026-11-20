@@ -2,8 +2,9 @@
 
 ``tests/test_theme.py`` and ``tests/test_scan.py`` settle what a theme means;
 these check that the meaning reaches a document, line by line and including the
-lines that only make sense together.  Offscreen, like the rest of the GUI
-tests, since nothing here needs to be looked at.
+lines that only make sense together, on a light background and on a dark one.
+Offscreen, like the rest of the GUI tests, since nothing here needs to be
+looked at.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtGui import QPalette, QTextCursor  # noqa: E402
+from PyQt6.QtGui import QColor, QPalette, QTextCursor  # noqa: E402
 from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from chumpeditor.gui.editor import RichTextEditor  # noqa: E402
@@ -30,6 +31,14 @@ OTHER = "#800000"
 STRING = "#008000"
 SECTION = "#ff0080"
 
+#: the same theme on a dark background, which is what each of those colours has
+#: to become for the text to be readable at all
+DARK_PLAIN = "#ffffff"
+DARK_WORDS = "#3fd0e0"
+DARK_OTHER = "#ff9e64"
+DARK_STRING = "#7ac74f"
+DARK_SECTION = "#ff6fb0"
+
 
 @pytest.fixture(scope="module")
 def qapp():
@@ -38,7 +47,23 @@ def qapp():
 
 @pytest.fixture
 def editor(qapp) -> RichTextEditor:
-    return RichTextEditor()
+    widget = RichTextEditor()
+    on_dark(widget, False)  # the light colours, whatever the desktop happens to be
+    return widget
+
+
+def on_dark(widget: RichTextEditor, dark: bool) -> None:
+    """Put the editor on a dark background, or take it off one.
+
+    Those two colours are what a dark theme uses and what a light one uses, and
+    setting them on the widget is what a theme does to it: the editor picks which
+    half of the theme to paint with from the colour behind its own text.
+    """
+    base, text = ("#2d2d2d", "#ffffff") if dark else ("#ffffff", "#000000")
+    palette = widget.palette()
+    palette.setColor(QPalette.ColorRole.Base, QColor(base))
+    palette.setColor(QPalette.ColorRole.Text, QColor(text))
+    widget.setPalette(palette)
 
 
 def painted(widget: RichTextEditor) -> list[list[tuple[str, str]]]:
@@ -198,3 +223,68 @@ def test_colouring_the_text_does_not_change_the_text(editor):
     editor.setPlainText('kind "cart"\n')
     assert editor.toPlainText() == 'kind "cart"\n'
     assert editor.document().availableUndoSteps() == 0
+
+
+# ---------------------------------------------------------------------------
+# a dark background, where the light colours cannot be seen
+# ---------------------------------------------------------------------------
+
+
+def test_the_editor_colours_for_the_background_it_actually_has(editor):
+    """The widget is the one that knows what is behind its text, so it is the
+    one that says which half of the theme gets painted."""
+    assert editor.on_dark_background() is False
+    assert editor.highlighter.dark is False
+
+    on_dark(editor, True)
+    assert editor.on_dark_background() is True
+    assert editor.highlighter.dark is True
+
+
+def test_the_plain_text_of_a_dark_editor_is_white_rather_than_black(editor):
+    """Black on a dark background is the same colour, which is why a theme has
+    to be able to say white."""
+    on_dark(editor, True)
+    editor.setPlainText("nonsense")
+    assert painted(editor) == [[("nonsense", DARK_PLAIN)]]
+
+
+def test_a_dark_background_takes_the_dark_colour_of_every_style(editor):
+    on_dark(editor, True)
+    editor.setPlainText('kind kuid-table "cart" <kuid:1:2>')
+    assert painted(editor) == [
+        [
+            ("kind", DARK_WORDS),
+            (" ", DARK_PLAIN),
+            ("kuid-table", DARK_OTHER),
+            (" ", DARK_PLAIN),
+            ('"cart"', DARK_STRING),
+            (" ", DARK_PLAIN),
+            ("<kuid:1:2>", DARK_SECTION),
+        ]
+    ]
+
+
+def test_a_light_background_takes_the_light_colours_back(editor):
+    on_dark(editor, True)
+    editor.setPlainText('kind "cart"')
+    on_dark(editor, False)
+    assert shown(editor) == [
+        [("kind", "words"), (" ", "plain"), ('"cart"', "string")]
+    ]
+
+
+def test_a_theme_that_names_no_dark_colour_is_painted_the_same_way(editor):
+    """One colour is allowed; it is only the shipped theme that has to be
+    readable on both, since the program cannot know what the desktop is."""
+    editor.set_theme(
+        parse_theme(
+            {
+                "styles": {"default": "#000000", "words": "#0000ff"},
+                "keywords": [{"style": "words", "words": ["kind"]}],
+            }
+        )
+    )
+    on_dark(editor, True)
+    editor.setPlainText("kind")
+    assert painted(editor) == [[("kind", WORDS)]]

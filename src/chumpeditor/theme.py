@@ -10,6 +10,10 @@ The theme the editor uses is ``trainz.json``: the copy in the configuration
 directory if someone has put one there, and the copy inside the program
 otherwise.  Both are plain text, and the styles are named after what they
 cover, so changing a colour means changing one line.
+
+A style may name a second colour for a dark background, since the whole point
+of a colour is that it can be seen; ``gui.editor`` says which of the two the
+text is sitting on.
 """
 
 from __future__ import annotations
@@ -42,12 +46,22 @@ class ThemeError(ValueError):
 
 @dataclass(frozen=True)
 class Style:
-    """One colour, and whether it is bold or italic."""
+    """One colour, and whether it is bold or italic.
+
+    ``dark`` is the same style for a dark background - the colours that read
+    well in a light editor are usually far too dim in a dark one, and black on
+    black reads as nothing at all.  Left out, the one colour is used either way.
+    """
 
     name: str
     colour: str = "#000000"
     bold: bool = False
     italic: bool = False
+    dark: str | None = None
+
+    def colour_for(self, dark: bool) -> str:
+        """The colour to paint with, once it is known what it sits on."""
+        return (self.dark or self.colour) if dark else self.colour
 
 
 @dataclass(frozen=True)
@@ -105,8 +119,7 @@ class Theme:
             "name": self.name,
             "caseSensitive": self.case_sensitive,
             "styles": {
-                name: {"colour": style.colour, "bold": style.bold, "italic": style.italic}
-                for name, style in self.styles.items()
+                name: _style_as_written(style) for name, style in self.styles.items()
             },
             "pairs": [{"style": p.style, "open": p.open, "close": p.close} for p in self.pairs],
             "keywords": [{"style": k.style, "words": list(k.words)} for k in self.keywords],
@@ -209,10 +222,20 @@ def _styles(data: object, origin: str) -> dict[str, Style]:
             colour=_colour(str(name), entry.get("colour", "#000000"), origin),
             bold=bool(entry.get("bold", False)),
             italic=bool(entry.get("italic", False)),
+            dark=_colour(str(name), entry["dark"], origin) if entry.get("dark") else None,
         )
     if "default" not in styles:
         raise ThemeError(f"{origin}: no default style, so plain text would have no colour")
     return styles
+
+
+def _style_as_written(style: Style) -> dict:
+    """One style, in the form the file holds it: the dark colour only when the
+    style has one, so a theme that does not bother with dark mode stays short."""
+    written = {"colour": style.colour, "bold": style.bold, "italic": style.italic}
+    if style.dark:
+        written["dark"] = style.dark
+    return written
 
 
 def _colour(name: str, value: object, origin: str) -> str:

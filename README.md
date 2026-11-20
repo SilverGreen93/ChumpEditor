@@ -100,9 +100,9 @@ What gets coloured is a small JSON file, not something written into the program:
   "name": "Trainz config",
   "caseSensitive": true,
   "styles": {
-    "default":     "#000000",
-    "keywords1":   {"colour": "#0000ff"},
-    "keywords3":   {"colour": "#ff0000", "italic": true},
+    "default":     {"colour": "#000000", "dark": "#ffffff"},
+    "keywords1":   {"colour": "#0000ff", "dark": "#3fd0e0"},
+    "keywords3":   {"colour": "#ff0000", "italic": true, "dark": "#ff5f5f"},
     "delimiters1": "#008000"
   },
   "pairs":    [{"style": "delimiters1", "open": "\"", "close": "\""}],
@@ -115,6 +115,14 @@ Add a word to a list or change a colour and the next line is coloured by it. A
 pair with an empty `close` colours the rest of the line it starts on, a pair left
 open at the end of a line carries on into the next one, and inside a pair the
 pair's own colour wins over any keyword.
+
+A style can also name a `dark` colour, which is what it becomes when the desktop
+is dark. Blue that is readable on white is nearly invisible on a dark editor, and
+black text on a black background is simply missing, so the shipped theme answers
+every style twice - the keyword blue, for instance, is cyan `#3fd0e0` in a dark
+editor. The editor decides which half to paint from the colour behind its own
+text, so it follows the desktop as it goes dark or light. A style that names no
+`dark` colour is painted with the one it has either way.
 
 To use your own copy rather than editing the program's files, put a
 `trainz.json` here:
@@ -141,7 +149,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         307 tests
+tests/                         301 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

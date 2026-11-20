@@ -5,32 +5,38 @@
     "default": {
       "colour": "#000000",
       "bold": false,
-      "italic": false
+      "italic": false,
+      "dark": "#ffffff"
     },
     "keywords1": {
       "colour": "#0000ff",
       "bold": false,
-      "italic": false
+      "italic": false,
+      "dark": "#3fd0e0"
     },
     "keywords2": {
       "colour": "#800000",
       "bold": false,
-      "italic": false
+      "italic": false,
+      "dark": "#ff9e64"
     },
     "keywords3": {
       "colour": "#ff0000",
       "bold": false,
-      "italic": true
+      "italic": true,
+      "dark": "#ff5f5f"
     },
     "delimiters1": {
       "colour": "#008000",
       "bold": false,
-      "italic": false
+      "italic": false,
+      "dark": "#7ac74f"
     },
     "delimiters2": {
       "colour": "#ff0080",
       "bold": false,
-      "italic": false
+      "italic": false,
+      "dark": "#ff6fb0"
     }
   },
   "pairs": [
