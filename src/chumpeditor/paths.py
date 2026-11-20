@@ -14,6 +14,10 @@ from pathlib import Path
 
 __all__ = ["APP_NAME", "config_dir"]
 
+#: the name as it is typed, and so spelled without a space: it is the folder
+#: below, the exe and the package.  The name a person reads is spelled
+#: "Chump Editor", with a space, and lives with the other display strings in
+#: ``gui/resources.py``; tests/test_gui.py keeps the two spellings in step.
 APP_NAME = "ChumpEditor"
 
 

@@ -46,6 +46,7 @@ from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
     CREDIT,
     DESCRIPTION,
+    DISPLAY_NAME,
     DROP_HINT,
     HOME_URL,
     ICON_FILE,
@@ -165,8 +166,16 @@ def text_of(widget: QTextEdit) -> str:
 # the window, and what is not in it any more
 # ---------------------------------------------------------------------------
 def test_the_window_is_titled_with_the_version(window):
-    assert APP_TITLE.startswith(f"{APP_NAME} ")
+    assert APP_TITLE.startswith(f"{DISPLAY_NAME} ")
     assert window.windowTitle() == f"{UNTITLED} - {APP_TITLE}"
+
+
+def test_the_name_spelled_two_ways_is_still_one_name():
+    """What is read out loud is 'Chump Editor'; what is typed - the exe, the
+    settings folder, the package - is 'ChumpEditor'.  Those two are the same
+    name only as long as they match, so the spaced spelling is checked against
+    the unspaced one rather than being trusted to stay in step."""
+    assert DISPLAY_NAME.replace(" ", "") == APP_NAME
 
 
 def test_the_main_area_is_one_rich_text_editor(window):
@@ -196,7 +205,7 @@ def test_the_icon_is_found_when_running_from_the_sources(window):
 
 
 def test_the_window_introduces_itself(window):
-    assert APP_TITLE.startswith(f"{APP_NAME} ")
+    assert APP_TITLE.startswith(f"{DISPLAY_NAME} ")
     assert CREDIT.startswith("© ")
     assert SUMMARY
 
@@ -512,7 +521,7 @@ def test_the_edit_menu_is_the_usual_set_of_edits(window):
 
 
 def test_the_help_menu_holds_the_about_box(window):
-    assert labels(menu_of(window, "Help")) == [f"About {APP_NAME}..."]
+    assert labels(menu_of(window, "Help")) == [f"About {DISPLAY_NAME}..."]
 
 
 def test_the_edit_menu_works_on_the_text(window, clipboard):
@@ -548,10 +557,10 @@ def test_an_edit_with_nothing_to_work_on_is_greyed_out(window, clipboard):
 
 
 def test_the_about_box_names_the_program_the_address_and_the_version(window, dialogs):
-    click(window, "Help", f"About {APP_NAME}...")
+    click(window, "Help", f"About {DISPLAY_NAME}...")
     kind, title, text = dialogs[-1]
-    assert (kind, title) == ("about", f"About {APP_NAME}")
-    for part in (APP_NAME, __version__, SUMMARY, DESCRIPTION, CREDIT, HOME_URL):
+    assert (kind, title) == ("about", f"About {DISPLAY_NAME}")
+    for part in (APP_TITLE, __version__, SUMMARY, DESCRIPTION, CREDIT, HOME_URL):
         assert part in text
     assert f'href="{HOME_URL}"' in text  # the address is a link, not a caption
 

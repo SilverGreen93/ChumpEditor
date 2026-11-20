@@ -21,19 +21,25 @@ __all__ = [
     "AUTHOR",
     "CREDIT",
     "DESCRIPTION",
+    "DISPLAY_NAME",
     "DROP_HINT",
     "HOME_URL",
     "ICON_FILE",
-    "ISSUES_URL",
     "SUMMARY",
     "resource_path",
     "window_icon",
 ]
 
 HOME_URL = "https://github.com/SilverGreen93/ChumpEditor"
-ISSUES_URL = f"{HOME_URL}/issues"
 
-APP_TITLE = f"{APP_NAME} {__version__}"
+#: The name people read, and the name the machine uses.  Everything that is a
+#: file, a folder or a key - the exe, %LOCALAPPDATA%\ChumpEditor, the package
+#: name, the desktop entry - is spelled ``ChumpEditor`` without a space, since
+#: that is what has to be typed; everything that is only ever read out loud is
+#: spelled ``Chump Editor``.  ``tests/test_gui.py`` keeps the two in step.
+DISPLAY_NAME = "Chump Editor"
+
+APP_TITLE = f"{DISPLAY_NAME} {__version__}"
 SUMMARY = "Trainz config editor"
 DESCRIPTION = (
     "Opens a Trainz config in either form - the binary .chump/.cdp container "

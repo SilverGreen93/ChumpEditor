@@ -33,7 +33,7 @@ from .about import ABOUT_TITLE, about_html
 from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
 from .menus import build_menus
-from .resources import APP_NAME, APP_TITLE, DROP_HINT, window_icon
+from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, window_icon
 
 __all__ = ["CHUMP_WRITE", "ChumpWindow", "TEXT_WRITE", "UNTITLED", "WINDOW_SIZE"]
 
@@ -233,7 +233,7 @@ class ChumpWindow(QMainWindow):
     def _confirm(self, question: str) -> bool:
         """A yes or no the user answers; anything else counts as no."""
         return (
-            QMessageBox.question(self, APP_NAME, question)
+            QMessageBox.question(self, DISPLAY_NAME, question)
             == QMessageBox.StandardButton.Yes
         )
 

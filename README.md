@@ -201,6 +201,11 @@ folder added to the *user* `PATH` so `chumpeditorcli` works from any terminal,
 and an entry in Add/Remove Programs. Rebuilding the same version is fine - it
 replaces the old install.
 
+The name is spelled two ways on purpose. **Chump Editor**, with a space, is
+what a person reads: the window title, the Start Menu shortcut, the entry in
+Add/Remove Programs. **ChumpEditor**, without one, is what a person types:
+`ChumpEditor.exe`, `chumpeditorcli`, and every folder.
+
 ## Notes on the format
 
 [chump-format.md](https://github.com/SilverGreen93/CDPExplorer/blob/master/chump-format.md)

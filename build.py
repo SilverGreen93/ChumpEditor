@@ -34,6 +34,11 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parent
 APP_NAME = "ChumpEditor"
+#: the name a person reads: the product name and description stamped into the
+#: exes, the name the Linux menu entry shows.  APP_NAME is the same name for
+#: typing: the exe, the folders, the settings directory and the package name
+#: are all spelled without a space, and installer/Product.wxs repeats the pair.
+DISPLAY_NAME = "Chump Editor"
 PACKAGE = "chumpeditor"
 AUTHOR = "SilverGreen93"
 VERSION = "2.0"
@@ -133,7 +138,7 @@ def version_file(name: str, description: str) -> list[str]:
                     vi.StringStruct("FileVersion", VERSION),
                     vi.StringStruct("InternalName", name),
                     vi.StringStruct("OriginalFilename", f"{name}.exe"),
-                    vi.StringStruct("ProductName", APP_NAME),
+                    vi.StringStruct("ProductName", DISPLAY_NAME),
                     vi.StringStruct("ProductVersion", VERSION),
                     vi.StringStruct("CompanyName", AUTHOR),
                     vi.StringStruct("LegalCopyright",
@@ -187,11 +192,11 @@ def build_exe() -> list[Path]:
     #   ChumpEditorCli.exe --console : normal console stdout/stderr for CLI use
     _pyinstaller(APP_NAME, GUI_ENTRY,
                  ["--onefile", "--windowed", *hidden_imports(), *bundled_assets(),
-                  *version_file(APP_NAME, f"{APP_NAME} - {SUMMARY}"),
+                  *version_file(APP_NAME, f"{DISPLAY_NAME} - {SUMMARY}"),
                   *_excludes()])
     _pyinstaller(f"{APP_NAME}Cli", CLI_ENTRY,
                  ["--onefile", "--console",
-                  *version_file(f"{APP_NAME}Cli", f"{APP_NAME} command line"),
+                  *version_file(f"{APP_NAME}Cli", f"{DISPLAY_NAME} command line"),
                   *_excludes(cli=True)])
     exes = [DIST / f"{APP_NAME}.exe", DIST / f"{APP_NAME}Cli.exe"]
     for exe in exes:
@@ -402,7 +407,7 @@ def _stage_unix_root(pkg_dir: Path) -> None:
     (apps / f"{PACKAGE}.desktop").write_text(
         "[Desktop Entry]\n"
         "Type=Application\n"
-        f"Name={APP_NAME}\n"
+        f"Name={DISPLAY_NAME}\n"
         f"Comment={SUMMARY}\n"
         f"Exec={PACKAGE}\n"
         f"Icon={PACKAGE}\n"

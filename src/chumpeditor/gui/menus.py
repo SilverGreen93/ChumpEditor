@@ -17,7 +17,7 @@ from typing import Callable
 from PyQt6.QtGui import QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import QMainWindow
 
-from .resources import APP_NAME
+from .resources import DISPLAY_NAME
 
 __all__ = ["build_menus"]
 
@@ -71,7 +71,7 @@ def _edit(menu, editor):
 
 def _help(menu, window: QMainWindow) -> None:
     """Who wrote this, and where it comes from."""
-    _add(menu, f"&About {APP_NAME}...", None, window.about)
+    _add(menu, f"&About {DISPLAY_NAME}...", None, window.about)
 
 
 def _add(menu, text: str, shortcut, slot: Callable[[], None]):

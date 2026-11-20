@@ -23,7 +23,7 @@
   <?ifndef DistDir?><?define DistDir = "..\dist" ?><?endif?>
   <?ifndef AssetsDir?><?define AssetsDir = "..\assets" ?><?endif?>
 
-  <Package Name="ChumpEditor"
+  <Package Name="Chump Editor"
            Manufacturer="SilverGreen93"
            Version="$(var.Version)"
            UpgradeCode="825241F8-9B03-4B27-8160-FB15A3529069"
@@ -59,8 +59,13 @@
       them as properties costs nothing; the Support/Contact/Comments values
       must come from the ARP*-prefixed property names (plain URLInfoAbout/
       Contact are not published).
+
+      Everything a person only reads is spelled "Chump Editor", with a space;
+      every name that is typed or stored - ChumpEditor.exe, the install folder,
+      the HKCU keys, the Start Menu folder, this MSI's own file name - stays
+      "ChumpEditor", without one.
     -->
-    <Property Id="DisplayName" Value="ChumpEditor" />
+    <Property Id="DisplayName" Value="Chump Editor" />
     <Property Id="DisplayVersion" Value="$(var.Version)" />
     <Property Id="Publisher" Value="SilverGreen93" />
     <Property Id="ARPCOMMENTS" Value="Trainz .chump text converter (GUI + command line)." />
@@ -148,7 +153,7 @@
                      Value="1"
                      KeyPath="yes" />
       <Shortcut Id="ApplicationShortcut"
-                Name="ChumpEditor"
+                Name="Chump Editor"
                 Description="Trainz .chump text converter"
                 Target="[INSTALLFOLDER]ChumpEditor.exe"
                 WorkingDirectory="INSTALLFOLDER" />
