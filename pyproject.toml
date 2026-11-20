@@ -1,6 +1,6 @@
 [project]
 name = "chumpeditor"
-version = "1.0"
+version = "2.0"
 description = "Convert Trainz .chump files to and from their text form"
 requires-python = ">=3.9"
 dependencies = []
