@@ -27,9 +27,14 @@ from .chump import (
 )
 
 __all__ = [
+    "ALL_GROUP",
     "ALL_SUFFIXES",
+    "CHUMP_GROUP",
     "CHUMP_SUFFIXES",
+    "FILTERS",
+    "TEXT_GROUP",
     "TEXT_SUFFIXES",
+    "as_file_text",
     "filter_string",
     "is_readable",
     "read_document",
@@ -41,12 +46,12 @@ __all__ = [
 #: every extension the editor takes, chump forms first
 ALL_SUFFIXES = CHUMP_SUFFIXES + TEXT_SUFFIXES
 
-#: the labels and wildcards the open and save dialogs offer, in that order
-FILTERS = (
-    ("All supported files", ALL_SUFFIXES),
-    ("Chump files", CHUMP_SUFFIXES),
-    ("Text files", TEXT_SUFFIXES),
-)
+#: the dialog groups, named so a save dialog can offer one form on its own
+ALL_GROUP = ("All supported files", ALL_SUFFIXES)
+CHUMP_GROUP = ("Chump files", CHUMP_SUFFIXES)
+TEXT_GROUP = ("Text files", TEXT_SUFFIXES)
+
+FILTERS = (ALL_GROUP, CHUMP_GROUP, TEXT_GROUP)
 
 
 def filter_string(*groups: tuple[str, tuple[str, ...]]) -> str:
