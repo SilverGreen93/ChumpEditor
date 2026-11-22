@@ -1582,10 +1582,13 @@ def test_a_real_config_file_is_reordered_in_the_window(window, dialogs, tmp_path
     click(window, "Tweaks", "Reorder tags")
 
     after = window.editor.toPlainText()
-    assert dialogs[-1][2].startswith("Reordered ")
-    # every container comes out set off from the tags around it, so the file is longer
+    said = dialogs[-1][2]
+    assert said.startswith("Reordered ")
+    # every container comes out set off from the tags around it, and a blank line
+    # that only parted two tags comes out, so the file keeps the length it had
     assert "}\n\n" in after
-    assert len(after.split("\n")) > len(before.split("\n"))
+    assert "added 1 blank line" in said and "removed 1 blank line" in said
+    assert after.split("\n")[1].startswith("kuid")
 
     tags = parse_text(after).tags
     assert [tag.name for tag in tags[:2]] == ["kuid", "username"]

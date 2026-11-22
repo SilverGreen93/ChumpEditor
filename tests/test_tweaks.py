@@ -117,6 +117,71 @@ def the_gaps_left(text: str) -> list[int]:
     return left
 
 
+def the_blanks_in_the_way(text: str) -> list[int]:
+    """The blank lines of this text standing where no blank line is asked for.
+
+    A blank line parts a container from the line written beside it and nothing
+    else, so one is in the way between two tags that each hold one value, under a
+    ``{``, above a ``}``, and twice over where one gap says the same thing once.
+    The blank lines above the first tag of the text and the ones making up its
+    ending are nobody's gap, and a blank line inside a value written over several
+    lines belongs to that value rather than to a gap.  The lines are read exactly
+    as they stand, which is how the rule is asked of text that never goes through
+    a reorder at all.
+    """
+    lines = text.split("\r\n") if "\r\n" in text else text.split("\n")
+    named: set[int] = set()
+    opened: set[int] = set()
+    closed: set[int] = set()
+    value: set[int] = set()
+    running = False  # inside a quoted value that ran over the line
+    for at, line in enumerate(lines):
+        stripped = line.strip()
+        if running:
+            value.add(at)
+            if '"' in stripped:
+                running = False
+            continue
+        if not stripped:
+            continue
+        if stripped == "{":
+            opened.add(at)
+            named.add(at - 1)
+        elif stripped == "}":
+            closed.add(at)
+        elif stripped[0].isalpha() and stripped.endswith("{"):
+            named.add(at)
+        if stripped.count('"') % 2:
+            running = True
+
+    keep = len(lines)
+    while keep and not lines[keep - 1].strip():
+        keep -= 1
+    at = 0
+    while at < keep and not lines[at].strip():
+        at += 1  # the blank lines above the first tag are nobody's gap
+
+    in_the_way: list[int] = []
+    while at < keep:
+        if lines[at].strip():
+            at += 1
+            continue
+        run = [at]
+        while run[-1] + 1 < keep and not lines[run[-1] + 1].strip():
+            run.append(run[-1] + 1)
+        over, under = run[0] - 1, run[-1] + 1
+        parts_a_container = over in closed and under not in opened | closed
+        parts_a_container_too = under in named and over not in opened | closed
+        if value.intersection(run) or value.intersection((over, under)):
+            pass  # written inside a value, so part of that value
+        elif not parts_a_container and not parts_a_container_too:
+            in_the_way.append(run[0] + 1)
+        elif len(run) > 1:
+            in_the_way.extend(number + 1 for number in run[1:])
+        at = run[-1] + 1
+    return in_the_way
+
+
 # ---------------------------------------------------------------------------
 # the change itself
 # ---------------------------------------------------------------------------
@@ -1573,13 +1638,102 @@ def test_a_blank_line_that_is_already_there_is_left_as_it_is():
         "\n"
         "mesh-table\n{\n}\n"
         "\n"
-        "\n"
         "kuid-table\n{\n}\n"
     )
     result = tweaks.reorder_tags(text)
 
     assert result.text == text
     assert result.gaps == ()
+    assert result.shut == ()
+
+
+def test_a_second_blank_line_where_one_stands_comes_out():
+    """One gap between two containers says the same thing once as the next one."""
+    text = (
+        'kind "interior"\n'
+        "\n"
+        "mesh-table\n{\n}\n"
+        "\n"
+        "\n"
+        "kuid-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == (
+        'kind "interior"\n'
+        "\n"
+        "mesh-table\n{\n}\n"
+        "\n"
+        "kuid-table\n{\n}\n"
+    )
+    assert result.shut == (6,)
+    assert result.status == "Removed 1 blank line"
+    assert "a blank line came out under line 6" in result.summary()
+    assert tweaks.reorder_tags(result.text).rewrites == ()
+
+
+def test_a_blank_line_between_two_tags_comes_out():
+    """A blank line parts a container from what stands beside it and nothing else."""
+    text = (
+        "kuid <kuid:2:100>\n"
+        "\n"
+        'kind "interior"\n'
+        "\n"
+        'author "nobody"\n'
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == (
+        "kuid <kuid:2:100>\n"
+        'kind "interior"\n'
+        'author "nobody"\n'
+    )
+    assert result.shut == (1, 2)
+    assert result.moves == ()
+    assert tweaks.reorder_tags(result.text).rewrites == ()
+
+
+def test_a_blank_line_beside_a_brace_comes_out():
+    """A blank line written inside a container parts it from its own braces."""
+    text = (
+        "kuid <kuid:2:100>\n"
+        "\n"
+        "mesh-table\n"
+        "{\n"
+        "\n"
+        "  a 1\n"
+        "  b 2\n"
+        "\n"
+        "}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == (
+        "kuid <kuid:2:100>\n"
+        "\n"
+        "mesh-table\n"
+        "{\n"
+        "  a 1\n"
+        "  b 2\n"
+        "}\n"
+    )
+    assert result.shut == (4, 6)
+    assert tweaks.reorder_tags(result.text).rewrites == ()
+
+
+def test_a_blank_line_inside_a_value_is_left_alone():
+    """A value written over several lines keeps the blank lines written in it."""
+    text = (
+        "kuid <kuid:2:100>\n"
+        'license "- one\n'
+        "\n"
+        '- two"\n'
+        'author "nobody"\n'
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.shut == ()
 
 
 def test_a_container_that_stays_where_it_is_still_gets_its_blank_lines():
@@ -1701,6 +1855,14 @@ def test_a_real_asset_ends_up_set_off_on_both_sides_of_every_container():
         assert not left, f"{name}: line {left}"
 
 
+def test_a_real_asset_ends_up_with_no_blank_line_that_is_not_a_container_gap():
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        text = read_text_file(SAMPLES / name)
+        stray = the_blanks_in_the_way(tweaks.reorder_tags(text).text)
+
+        assert not stray, f"{name}: line {stray}"
+
+
 def test_the_real_config_files_are_already_set_off_wherever_a_container_stands():
     # the text files come out of the decoder, which lays a file out this way
     # before anybody touches it, so the reorder is never asked for a gap
@@ -1716,6 +1878,14 @@ def test_a_decoded_file_sets_its_containers_off_at_every_depth():
         left = the_gaps_left(text)
 
         assert not left, f"{name}: line {left}"
+
+
+def test_a_decoded_file_writes_no_blank_line_that_is_not_a_container_gap():
+    for name in ("config1.chump", "config2.chump", "config3.chump", "semnal.chump"):
+        text = render_text(load_chump(SAMPLES / name))
+        stray = the_blanks_in_the_way(text)
+
+        assert not stray, f"{name}: line {stray}"
 
 
 def test_a_decoded_file_needs_no_blank_line_and_no_second_press():

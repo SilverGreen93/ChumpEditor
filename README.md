@@ -108,9 +108,11 @@ are never part of it, and what is saved is plain text whatever a line looked lik
   Find next (F3).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
-  of Trainz wrote a file.  Reorder tags also sets every container off from the tags
-  around it with a blank line; a file the editor expands is written that way from
-  the start, at every depth, so the tweak is usually only asked for the order.
+  of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
+  container off from the tags beside it, and a blank line that only parts two tags
+  comes out.  A file the editor expands already has its containers set off that way,
+  at every depth, so what is left to fix is mostly the order, along with any blank
+  line an out-of-place tag carries into the wrong gap.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -392,35 +394,44 @@ obsolete-table
 }
 ```
 
-On top of the order, every container is set off from the tags around it: a blank
-line goes under its closing `}` wherever another tag follows it, and another above
-the line naming it wherever a tag stands there, however deep inside the file the
-container sits, since those gaps are what show where one container ends and the
-next one begins.  None goes in beside a brace - above another `}` would drive a
-wedge between a tag and the container it is written inside, and below a `{` would
-part a container from the brace it opens - and none at the start or the end of the
-file, where there is nothing to separate.  A blank line already there is left as it
-is, which is why one gap between two containers serves the two of them.  The decoder
-follows this rule too, so expanding a `.chump` puts text on screen with its
-containers already set off at every depth, and the tweak is left with only the
-order to fix.
+On top of the order, a blank line separates a container from the line written
+beside it, and nothing else: one under its closing `}` wherever another tag
+follows it, and one above the line naming it wherever a tag stands there, however
+deep inside the file the container sits, since those gaps are what show where one
+container ends and the next one begins. None stands beside a brace - above another
+`}` would drive a wedge between a tag and the container it is written inside, and
+below a `{` would part a container from the brace it opens - and none at the start
+or the end of the file, where there is nothing to separate. The rule is read both
+ways, so a gap comes in where it is missing and comes out where the file has one
+the rule does not ask for: a blank line between two tags that each hold one value,
+a second blank line in a gap that one already says once, and a blank line inside a
+container's braces. One gap between two containers serves the two of them. A blank
+line written inside a value that runs over several lines belongs to that value and
+is left where it is. The decoder puts those container gaps in when it expands a
+`.chump`, so text coming from a `.chump` whose tags already stand in the order needs
+nothing but the order; where its tags do not, a blank line travelling with a tag can
+land between two tags, and comes out.
 
 Nothing inside a container is moved out of it, and a container moves as one block,
-so a subtag cannot be split from the braces holding it. The blank lines under a
-tag travel with it, and the blank lines at the end of the file stay at the end, so
-the file keeps the shape it had. Only the stretch between the first tag out of
-place and the last one is rewritten, in every container that has tags out of place
-as well as at the top, plus one short edit for each blank line that has to come in
-where nothing moved - everything else is not touched, which is why pressing the
-item a second time says *Nothing was reordered*. One press of Undo takes the whole
-change back, every stretch and every blank line together.
+so a subtag cannot be split from the braces holding it. The blank lines under a tag
+travel with it and are then looked at as the file stands afterwards, which is why a
+gap that belonged to a container keeps working after that container has moved and a
+gap that only parted two tags comes out. The blank lines at the start of the file
+and the ones at the end are nobody's gap and are left alone. Only the stretch
+between the first tag out of place and the last one is rewritten, in every
+container that has tags out of place as well as at the top, plus one short edit for
+each blank line that has to come in or go where nothing moved - everything else is
+not touched, which is why pressing the item a second time says *Nothing was
+reordered*. One press of Undo takes the whole change back, every stretch and every
+blank line together.
 
 The message names every tag that moved, in a container as well as at the top, and
-the line it moved to, and every container that gained a blank line - saying whether
-it went above the line naming the container or under the `}` closing it, and which
-line it went beside. A tag whose value or container is never closed, and a line
-that is not a tag at all, mean there is no safe line to cut the file on: nothing
-moves at all, and the message is a warning naming the line.
+the line it moved to, every container that gained a blank line - saying whether it
+went above the line naming the container or under the `}` closing it, and which
+line it went beside - and every blank line that came out, as the line it stood
+under. A tag whose value or container is never closed, and a line that is not a tag
+at all, mean there is no safe line to cut the file on: nothing moves at all, and the
+message is a warning naming the line.
 
 ### Colour themes
 
@@ -503,7 +514,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, find.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         608 tests
+tests/                         614 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

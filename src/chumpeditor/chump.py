@@ -548,7 +548,9 @@ def render_text(root: Tag, *, eol: str = "\r\n") -> str:
     naming it where a tag stands there.  The expander left that line between the
     entries at the top of the file only; carrying it down every level is the same
     rule the editor's Reorder tags tweak asks for, which ``tweaks`` spells out in
-    ``_the_blank_lines_to_open``.
+    ``_the_blank_lines_to_open`` and reads back the other way in
+    ``_the_blank_lines_to_shut``: nothing here writes a blank line the tweak would
+    take out, so the text comes out clean before the tags are put in order.
     """
     lines = [""]
     _render_tags(root.tags, 0, lines)

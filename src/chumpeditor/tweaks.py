@@ -1026,6 +1026,10 @@ class Order:
     #: the containers that got a blank line beside them, in the order the lines
     #: stand in the text now
     gaps: tuple[Gap, ...] = ()
+    #: the lines a blank line was taken off, because a blank line parts a
+    #: container from what stands beside it and nothing else, counted in the text
+    #: as it stands afterwards
+    shut: tuple[int, ...] = ()
     #: why the file was left alone altogether, or '' when it was not
     blocked: str = ""
 
@@ -1042,6 +1046,10 @@ class Order:
             count = len(self.gaps)
             lines = f"{count} blank {'line' if count == 1 else 'lines'}"
             said = f"Added {lines}" if not said else f"{said}, added {lines}"
+        if self.shut:
+            count = len(self.shut)
+            lines = f"{count} blank {'line' if count == 1 else 'lines'}"
+            said = f"Removed {lines}" if not said else f"{said}, removed {lines}"
         return said or "Nothing was reordered"
 
     @property
@@ -1058,7 +1066,7 @@ class Order:
         """What happened, in the words the window shows afterwards."""
         if self.blocked:
             return f"{self.status}: {self.blocked}"
-        if not self.moves and not self.gaps:
+        if not self.moves and not self.gaps and not self.shut:
             return (
                 "Nothing was reordered.  kuid and username come first, then the "
                 "tags that hold one value, then the containers, and kuid-table "
@@ -1066,7 +1074,11 @@ class Order:
                 "the tags that hold a value come before the containers written "
                 "in it, and every container is set off from the tags around it."
             )
-        listed = "\n".join(f"  {item}" for item in (*self.moves, *self.gaps))
+        told = [str(item) for item in (*self.moves, *self.gaps)]
+        told += [
+            f"a blank line came out under line {number}" for number in self.shut
+        ]
+        listed = "\n".join(f"  {item}" for item in told)
         return f"{self.status}:\n\n{listed}"
 
 
@@ -1082,18 +1094,25 @@ def reorder_tags(text: str) -> Order:
     never moved out of the container it is written in, and a container travels
     whole with whatever stands inside it.
 
-    On top of the order, every container is set off from the tags around it with a
-    blank line, however deep inside the file it is: one under its closing brace
-    and one above the line naming it, each only where a tag stands there rather
-    than a brace.  The rule is ``_the_blank_lines_to_open``.  The gaps are looked
-    for in the text as it will stand once the tags have moved, since a container
-    that moved has something else beside it.
+    On top of the order, a blank line parts a container from the line written
+    beside it and nothing else, however deep inside the file it is: one under a
+    closing brace and one above the line naming a container, each only where a
+    line that is not a brace stands there, so a container and its own brace are
+    never parted and two tags holding one value are never split.  What that asks
+    for comes in where it is missing, which is ``_the_blank_lines_to_open``, and
+    what it does not ask for comes out, which is ``_the_blank_lines_to_shut``: a
+    blank line between two tags, a second blank line where one gap says the same
+    thing once, and a blank line under an opening brace or above a closing one.
+    The blank lines above the first tag of the file and the ones making up its
+    ending are nobody's gap and are left alone.  Both are looked for in the text
+    as it will stand once the tags have moved, since a container that moved has
+    something else beside it.
 
     Only the stretch between the first tag out of place and the last one is
     rewritten, in every container that has tags out of place as well as at the
-    top, plus one short edit for each blank line that has to come in where nothing
-    moved, so the change stays small enough to follow afterwards.  The lot of them
-    go in as one edit that one press of Undo takes back.
+    top, plus one short edit for each blank line that has to come in or go where
+    nothing moved, so the change stays small enough to follow afterwards.  The lot
+    of them go in as one edit that one press of Undo takes back.
     """
     lines, eol = _split(text)
     # the blank lines at the end of the text are the file's ending rather than
@@ -1108,40 +1127,72 @@ def reorder_tags(text: str) -> Order:
     settled = _the_lines_as_they_stand(top) + list(range(keep, len(lines)))
     moved = [lines[number] for number in settled]
 
+    # the blank lines standing where no blank line belongs once the tags have
+    # moved, and the lines of the text with those blank lines off them
+    shut = set(_the_blank_lines_to_shut(moved))
+    standing: list[str] = []
+    back: list[int] = []  # which line of the moved text each one of them was
+    for at, line in enumerate(moved):
+        if at not in shut:
+            standing.append(line)
+            back.append(at)
+
     # the containers with no blank line beside them, told as the line the blank
     # line goes under in the text the moves have made
-    want = _the_blank_lines_to_open(moved)
-    under = [one.after for one in want]
-    opening = set(under)
+    want = _the_blank_lines_to_open(standing)
+    opening = {one.after for one in want}
 
-    # every line once those blank lines are in as well, so the text the rewrites
-    # write out can be cut straight out of it
+    # every line once the blank lines that came out are gone and the ones that
+    # have to come in are in, so the text the rewrites write out can be cut
+    # straight out of it
     finished: list[str] = []
-    for at, line in enumerate(moved):
+    for at, line in enumerate(standing):
         finished.append(line)
         if at in opening:
             finished.append("")
 
-    stretches = _the_stretches_written_out(top)
-    rewrites = [
-        _one_stretch_written_out(lines, eol, finished, under, opening, stretch)
-        for stretch in stretches
-    ]
-    for one in want:
-        if not _a_stretch_holds(stretches, one.after):
-            # the blank line is put in after the line, leaving the line itself
-            # and everything on either side of it exactly as it was
-            at = _end_of(lines, eol, one.after)
-            rewrites.append(Rewrite(start=at, end=at, text=eol))
-
-    # which line of the finished text each line that stands still ends up on
+    # which line of the finished text each line that stands still ends up on, and
+    # where each line of the moved text holds its place there; a blank line that
+    # came out has no line of its own to point at, and is noted as the line it
+    # stood on in the text as it stands afterwards
     stand: dict[int, int] = {}
+    place: dict[int, int] = {}
+    gone: list[int] = []
     where = 0
-    for at, number in enumerate(settled):
+    at = 0
+    for was, number in enumerate(settled):
+        if was in shut:
+            gone.append(where)  # the line it stood under, counted the way lines are
+            continue
         stand[number] = where
+        place[was] = where
         where += 1
         if at in opening:
             where += 1  # the blank line that came in under this one pushes it down
+        at += 1
+
+    # the lines of the moved text a blank line comes in under, which is where the
+    # rewrites look for them
+    opened = {back[one.after] for one in want}
+    stretches = _the_stretches_written_out(top)
+    rewrites = [
+        _one_stretch_written_out(lines, eol, finished, place, opened, stretch)
+        for stretch in stretches
+    ]
+    for one in want:
+        number = settled[back[one.after]]
+        if not _a_stretch_holds(stretches, number):
+            # the blank line is put in after the line, leaving the line itself
+            # and everything on either side of it exactly as it was
+            at = _end_of(lines, eol, number)
+            rewrites.append(Rewrite(start=at, end=at, text=eol))
+    for was in sorted(shut):
+        number = settled[was]
+        if not _a_stretch_holds(stretches, number):
+            # the blank line goes with the line ending it stands on, which leaves
+            # every line with something written on it exactly as it was
+            at = _start_of(lines, eol, number)
+            rewrites.append(Rewrite(start=at, end=at + len(eol), text=""))
 
     return Order(
         text=_apply(text, rewrites),
@@ -1150,11 +1201,12 @@ def reorder_tags(text: str) -> Order:
         gaps=tuple(
             Gap(
                 tag=one.tag,
-                line=_the_line_the_gaps_land_on(one.about, under) + 1,
+                line=stand[settled[back[one.about]]] + 1,
                 above=one.above,
             )
             for one in want
         ),
+        shut=tuple(gone),
     )
 
 
@@ -1457,23 +1509,30 @@ def _one_stretch_written_out(
     lines: list[str],
     eol: str,
     finished: list[str],
-    under: list[int],
-    opening: set[int],
+    place: dict[int, int],
+    opened: set[int],
     stretch: tuple[int, int],
 ) -> Rewrite:
     """One rewrite, writing a whole stretch of lines out as they should stand.
 
     The stretch stands on the same lines in the text as it is and the text as it
-    will be, so the lines it holds are looked up by counting the blank lines that
-    came in above them.  A blank line wanted under a line the stretch holds goes
+    will be, so the lines it holds are read out of ``place``, the line each line of
+    the stretch holds in the finished text: the blank lines that came in above it
+    have pushed it down there already, and the blank lines that came out are not in
+    it at all.  However many lines the stretch ends up with, the line ending below
+    the last of them is left in the file, which is what joins the stretch to
+    whatever follows it.  A blank line wanted under a line the stretch holds goes
     into the same rewrite: a rewrite of its own cut at the end of the stretch
     would work against it once the rewrites are carried out from the end of the
     file backwards.
     """
     low, high = stretch
-    above = _the_line_the_gaps_land_on(low, under)
-    below = _the_line_the_gaps_land_on(high, under) + 1
-    if high in opening:
+    above = place[low]
+    last = high
+    while last not in place:
+        last -= 1  # the blank lines at the end of the stretch came out
+    below = place[last] + 1
+    if last in opened:
         below += 1
     return Rewrite(
         start=_start_of(lines, eol, low),
@@ -1587,6 +1646,90 @@ def _the_blank_lines_to_open(lines: list[str]) -> tuple[_Opening, ...]:
     return tuple(wanted[place] for place in sorted(wanted))
 
 
+def _the_blank_lines_to_shut(lines: list[str]) -> tuple[int, ...]:
+    """Which blank lines stand where no blank line is asked for.
+
+    The same rule read from the other side as ``_the_blank_lines_to_open``: a
+    blank line parts a container from the line written beside it and nothing else,
+    so a blank line is in the way between two tags that each hold one value, under
+    an opening brace, above a closing one, and twice over where one gap already
+    says the same thing once.  The blank lines above the first tag of the text and
+    the ones making up its ending are nobody's gap here either, and a blank line
+    standing inside a value written over several lines belongs to that value rather
+    than to anybody's gap; a blank line that comes out is told as its place among
+    these lines, which is where the edit cutting it is cut.
+    """
+    containers = _the_containers_in(lines)
+    names = {one.first for one in containers}
+    braces = {one.brace for one in containers if one.brace != one.first}
+    closes = {one.last for one in containers}
+    held = _the_lines_held_by_a_value(lines)
+
+    # the ending of the text is one blank line longer than its line endings, and
+    # the blank lines below the last tag belong to it rather than to anybody
+    keep = len(lines) - _the_blank_lines_at_the_end(lines)
+    gone: list[int] = []
+    at = 0
+    while at < keep:
+        if lines[at].strip():
+            at += 1
+            continue
+        run = [at]
+        while run[-1] + 1 < keep and not lines[run[-1] + 1].strip():
+            run.append(run[-1] + 1)
+        if run[0] and not held.intersection(run):
+            over, under = run[0] - 1, run[-1] + 1
+            if under >= keep or not _a_blank_line_belongs(over, under, names, braces, closes):
+                gone.extend(run)  # nothing here asks for a blank line at all
+            else:
+                gone.extend(run[1:])  # one gap between them says it once already
+        at = run[-1] + 1
+    return tuple(gone)
+
+
+def _a_blank_line_belongs(
+    over: int, under: int, names: set[int], braces: set[int], closes: set[int]
+) -> bool:
+    """Whether a blank line may stand between two lines that hold something.
+
+    ``over`` and ``under`` are the lines above and below the gap, and they are not
+    blank.  A blank line stands there when it parts a container from what is
+    written beside it: a closing brace with a line under it, or the line naming a
+    container with a line above it, one gap between two containers serving them
+    both.  Nothing stands under an opening brace or above a closing one, since
+    that would part a container from its own brace; a name written with its brace
+    after it is the name's own line rather than an opening brace, which is why the
+    gap above such a container still comes in.
+    """
+    if over in braces or under in closes:
+        return False
+    return over in closes or under in names
+
+
+def _the_lines_held_by_a_value(lines: list[str]) -> set[int]:
+    """The lines a value written over more than one line takes up.
+
+    A blank line in the middle of a quoted value is part of that value, not a gap
+    somebody left between two tags, and no blank line rule reaches into it.  The
+    walk is the codec's own, from a tag to the line its value ends on and on to the
+    next, so the lines of a running value are found inside a container as well as
+    at the top of the file.
+    """
+    held: set[int] = set()
+    todo: list[tuple[int, int]] = [(0, len(lines))]
+    while todo:
+        start, end = todo.pop()
+        tags, because = _the_tags_between(lines, start, end)
+        if because:
+            continue
+        for tag in tags:
+            if tag.brace >= 0:
+                todo.append((tag.brace + 1, tag.last))
+            elif tag.last > tag.first:
+                held.update(range(tag.first + 1, tag.last + 1))
+    return held
+
+
 def _the_containers_in(lines: list[str]) -> tuple[_Tag, ...]:
     """Every container in the text, in the order their names are written.
 
@@ -1650,12 +1793,3 @@ def _the_tags_between(
         )
         at = last + 1
     return tags, ""
-
-
-def _the_line_the_gaps_land_on(where: int, under: list[int]) -> int:
-    """Which line a line stands on once blank lines come in below other lines.
-
-    ``under`` holds the lines a blank line goes under, in the text before the
-    blank lines, and each one of them below a line pushes it down by a line.
-    """
-    return where + sum(1 for place in under if place < where)
