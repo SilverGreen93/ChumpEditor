@@ -199,7 +199,8 @@ class ChumpWindow(QMainWindow):
         )
 
     def reorder_tags(self) -> None:
-        """Tweaks > Reorder tags: kuid and username first, the containers last."""
+        """Tweaks > Reorder tags: kuid and username first, the containers last, and a
+    blank line under every container."""
         self._tweak("Reorder tags", tweaks.reorder_tags)
 
     def _tweak(

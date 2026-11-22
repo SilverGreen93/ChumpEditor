@@ -100,7 +100,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
-  of Trainz wrote a file.
+  of Trainz wrote a file.  Reorder tags puts a blank line under every container as
+  well as putting the tags in order.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -229,6 +230,13 @@ shape to them, and an asset edited by hand over ten years tends to lose it. **Tw
 - `kuid-table` and `obsolete-table` after all the other containers, when the file
   has them.
 
+On top of the order, the containers are opened out: a blank line goes under every
+container's closing `}`, however deep inside the file that container sits, since
+the gap is what shows where one container ends and the tag below it begins.  None
+goes in directly above another `}`, which would drive a wedge between a tag and
+the container it is written inside, and none at the end of the file, where there
+is nothing to separate; a blank line that is already there is left as it is.
+
 ```
 kind                                    "interior"
 mesh-table
@@ -261,26 +269,30 @@ mesh-table
     mesh                                "interior.im"
   }
 }
+
 kuid-table
 {
 }
+
 obsolete-table
 {
 }
 ```
 
-Nothing inside a container is looked at, and a container moves as one block, so a
-subtag cannot be split from the braces holding it. The blank lines under a tag
-travel with it, and the blank lines at the end of the file stay at the end, so the
-file keeps the shape it had. Only the stretch between the first tag out of place
-and the last one is rewritten - everything already where it belongs is not touched,
-which is why pressing the item a second time says *Nothing was reordered*. One
-press of Undo takes the whole move back.
+Nothing inside a container is moved out of it, and a container moves as one block,
+so a subtag cannot be split from the braces holding it. The blank lines under a
+tag travel with it, and the blank lines at the end of the file stay at the end, so
+the file keeps the shape it had. Only the stretch between the first tag out of
+place and the last one is rewritten, plus one short edit for each blank line that
+has to come in where nothing moved - everything else is not touched, which is why
+pressing the item a second time says *Nothing was reordered*. One press of Undo
+takes the whole change back, the moved tags and the blank lines together.
 
-The message names every tag that moved and the line it moved to. A tag whose value
-or container is never closed, and a line at the top that is not a tag at all, mean
-there is no safe line to cut the file on: nothing moves at all, and the message is
-a warning naming the line.
+The message names every tag that moved and the line it moved to, and every
+container that gained a blank line and the line the blank line went under. A tag
+whose value or container is never closed, and a line at the top that is not a tag
+at all, mean there is no safe line to cut the file on: nothing moves at all, and
+the message is a warning naming the line.
 
 ### Colour themes
 
@@ -361,7 +373,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         476 tests
+tests/                         486 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

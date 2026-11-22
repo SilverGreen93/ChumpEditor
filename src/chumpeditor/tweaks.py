@@ -76,11 +76,16 @@ in::
     kuid-table, obsolete-table        last of all, when the file has them
 
 A container travels whole, with its subtags exactly as they stood, and nothing
-inside one is looked at.  The blank lines under a tag travel with it so the gaps
-keep their shape, and the blank lines at the end of the file stay at the end.
-A tag whose value or container is never closed, and a line at the top that is
-not a tag at all, mean the tags cannot be told apart from each other, and then
-nothing at all is moved and the person is warned.
+inside one is moved out of it.  The blank lines under a tag travel with it so the
+gaps keep their shape, and the blank lines at the end of the file stay at the end.
+On top of that, one blank line goes under every container - however deep inside
+the file it is - wherever a tag follows its closing brace, since that gap is what
+shows where a container ends.  None goes in above another closing brace, which
+would drive a wedge between a tag and the container it is written inside, and none
+at the end of the file, where there is nothing to separate.  A tag whose value or
+container is never closed, and a line at the top that is not a tag at all, mean
+the tags cannot be told apart from each other, and then nothing at all is moved
+and the person is warned.
 
 Everything here is free of Qt and answers in character positions within the
 text, so the rules can be read and tested without a window and the editor can
@@ -96,6 +101,7 @@ from .chump import VALUE_COLUMN
 
 __all__ = [
     "Conversion",
+    "Gap",
     "MeshTable",
     "MeshTables",
     "Move",
@@ -633,11 +639,7 @@ def _the_tag_takes_up_to(lines: list[str], where: int, rest: str) -> tuple[int, 
             return where, "holds a quoted value that is never closed"
         return closing, ""
 
-    brace = -1
-    if rest.startswith("{") and not rest.endswith("}"):
-        brace = where  # the brace sits on the name's own line
-    elif not rest and _a_brace_is_next(lines, where + 1):
-        brace = where + 1  # and the name's line holds nothing else
+    brace = _the_brace_the_tag_opens(rest, lines, where)
     if brace >= 0:
         closing = _the_container_ends_at(lines, brace + 1, 1)
         if closing is None:
@@ -726,9 +728,6 @@ class MeshTable:
     end: int
     #: the container that went in, exactly as the text now holds it
     text: str
-
-    def __str__(self) -> str:
-        return f"asset-filename {self.source!r} became mesh-table {self.mesh!r}"
 
     def __str__(self) -> str:
         return f"asset-filename {self.source!r} became mesh-table {self.mesh!r}"
@@ -974,6 +973,23 @@ class Move:
 
 
 @dataclass(frozen=True)
+class Gap:
+    """One container that had no blank line under it, and the line it got one.
+
+    ``line`` is counted in the text as it stands afterwards, which is the text
+    the person is looking at when the window says this.
+    """
+
+    #: the tag whose container it is, spelled as the file spells it
+    tag: str
+    #: the line the container's closing brace stands on, counted from 1
+    line: int
+
+    def __str__(self) -> str:
+        return f"a blank line went under the {self.tag} on line {self.line}"
+
+
+@dataclass(frozen=True)
 class Order:
     """What reordering did, and the text after it.
 
@@ -983,12 +999,17 @@ class Order:
     all, and is empty when they could be.
     """
 
-    #: the whole text, with the tags in their new places
+    #: the whole text, with the tags in their new places and the containers
+    #: opened out
     text: str
-    #: the one edit that moves them, empty when nothing needed moving
+    #: the edits that did it: one to move the tags, one for each blank line that
+    #: came in where nothing moved, and empty when nothing needed doing
     rewrites: tuple[Rewrite, ...] = ()
     #: the tags that changed place, in the order they stand in the text now
     moves: tuple[Move, ...] = ()
+    #: the containers that got a blank line under them, in the order the lines
+    #: stand in the text now
+    gaps: tuple[Gap, ...] = ()
     #: why the file was left alone altogether, or '' when it was not
     blocked: str = ""
 
@@ -997,10 +1018,15 @@ class Order:
         """The same news in one line, for a status bar too narrow for the rest."""
         if self.blocked:
             return "The tags cannot be reordered"
-        count = len(self.moves)
-        if not count:
-            return "Nothing was reordered"
-        return f"Reordered {count} {'tag' if count == 1 else 'tags'}"
+        said = ""
+        if self.moves:
+            count = len(self.moves)
+            said = f"Reordered {count} {'tag' if count == 1 else 'tags'}"
+        if self.gaps:
+            count = len(self.gaps)
+            lines = f"{count} blank {'line' if count == 1 else 'lines'}"
+            said = f"Added {lines}" if not said else f"{said}, added {lines}"
+        return said or "Nothing was reordered"
 
     @property
     def warning(self) -> bool:
@@ -1016,17 +1042,15 @@ class Order:
         """What happened, in the words the window shows afterwards."""
         if self.blocked:
             return f"{self.status}: {self.blocked}"
-        parts: list[str] = []
-        if self.moves:
-            listed = "\n".join(f"  {item}" for item in self.moves)
-            parts.append(f"{self.status}:\n\n{listed}")
-        else:
-            parts.append(
+        if not self.moves and not self.gaps:
+            return (
                 "Nothing was reordered.  kuid and username come first, then the "
                 "tags that hold one value, then the containers, and kuid-table "
-                "and obsolete-table after all of them."
+                "and obsolete-table after all of them, every container with a "
+                "blank line under it."
             )
-        return "\n\n".join(parts)
+        listed = "\n".join(f"  {item}" for item in (*self.moves, *self.gaps))
+        return f"{self.status}:\n\n{listed}"
 
 
 def reorder_tags(text: str) -> Order:
@@ -1036,39 +1060,109 @@ def reorder_tags(text: str) -> Order:
     order they were found, then the containers in the order they were found, and
     ``kuid-table`` and ``obsolete-table`` after the rest of the containers.  A
     container travels whole with its subtags as they are, and nothing inside one
-    is looked at.
+    is moved out of it.
+
+    On top of the order, a blank line goes under every container, however deep
+    inside the file it is, wherever a tag follows the closing brace - the rule is
+    ``_the_blank_lines_to_open``.  The gaps are looked for in the text as it will
+    stand once the tags have moved, since a container that moved has something
+    else under it.
 
     Only the stretch between the first tag out of place and the last one is
-    rewritten, so the change stays small enough to follow afterwards, and it goes
-    in as one edit that one press of Undo takes back.
+    rewritten, plus one short edit for each blank line that has to come in where
+    nothing moved, so the change stays small enough to follow afterwards.  The
+    lot of them go in as one edit that one press of Undo takes back.
     """
     lines, eol = _split(text)
-    blocks, fault = _the_top_level_blocks(lines)
-    if fault:
-        return Order(text=text, blocked=fault)
+    blocks, because = _the_top_level_blocks(lines)
+    if because:
+        return Order(text=text, blocked=because)
 
     wanted = _the_order_they_should_be_in(blocks)
     edges = _the_part_that_moves(blocks, wanted)
-    if edges is None:
-        return Order(text=text)
+    # the stretch of lines the move rewrites, empty when nothing moves
+    low, high = (0, -1)
+    if edges is not None:
+        low, high = blocks[edges[0]].first, blocks[edges[1]].last
 
-    first, last = edges
-    # the same blocks, only between the two edges and in the order they belong
-    moving = wanted[first : last + 1]
-    body = eol.join(
-        line for block in moving for line in lines[block.first : block.last + 1]
-    )
-    rewrite = Rewrite(
-        start=_start_of(lines, eol, blocks[first].first),
-        # the line ending after the last line is left outside the stretch, so
-        # the file keeps the ending it had
-        end=_end_of(lines, eol, blocks[last].last),
-        text=body,
-    )
+    # the text as it will stand with the tags moved and nothing else done.  The
+    # move only shuffles whole blocks, so the same lines come back either way,
+    # and ``origin`` keeps which line each one of them used to be
+    settled = list(lines)
+    origin = list(range(len(lines)))
+    if edges is not None:
+        first, last = edges
+        moved = [
+            number
+            for block in wanted[first : last + 1]
+            for number in range(block.first, block.last + 1)
+        ]
+        settled[low : high + 1] = [lines[number] for number in moved]
+        origin[low : high + 1] = moved
+
+    # the containers with a tag but no blank line under them, told as the line
+    # their brace closes on, in the moved text, and the tag that opened them
+    want = _the_blank_lines_to_open(settled)
+    under = [place for place, _ in want]
+    opening = set(under)
+
+    # every line once those blank lines are in as well, so the text the rewrites
+    # write out can be cut straight out of it
+    finished: list[str] = []
+    for at, line in enumerate(settled):
+        finished.append(line)
+        if at in opening:
+            finished.append("")
+
+    moves: tuple[Move, ...] = ()
+    rewrites: list[Rewrite] = []
+    if edges is not None and low - 1 in opening:
+        # a blank line wanted immediately above the moved tags goes into the same
+        # rewrite, since two rewrites cut at the same character would work over
+        # each other once they are carried out from the end of the file backwards
+        low -= 1
+    if edges is not None:
+        # the lines the finished text holds where the moved stretch stood: the
+        # moved lines themselves, the blank lines that came in among them, and
+        # the one under the last of them when that last line closes a container
+        above = _the_line_the_gaps_land_on(low, under)
+        below = _the_line_the_gaps_land_on(high, under) + 1
+        if high in opening:
+            below += 1
+        rewrites.append(
+            Rewrite(
+                start=_start_of(lines, eol, low),
+                # the line ending after the last line is left outside the stretch,
+                # so the file keeps the ending it had
+                end=_end_of(lines, eol, high),
+                text=eol.join(finished[above:below]),
+            )
+        )
+        moves = _the_tags_that_moved(
+            blocks,
+            wanted[edges[0] : edges[1] + 1],
+            edges[0],
+            {
+                was: _the_line_the_gaps_land_on(at, under)
+                for at, was in enumerate(origin)
+            },
+        )
+
+    for place, tag in want:
+        if not low <= place <= high:
+            # the blank line is put in after the line, leaving the line itself
+            # and everything on either side of it exactly as it was
+            at = _end_of(lines, eol, place)
+            rewrites.append(Rewrite(start=at, end=at, text=eol))
+
     return Order(
-        text=_apply(text, [rewrite]),
-        rewrites=(rewrite,),
-        moves=_the_tags_that_moved(blocks, moving, first),
+        text=_apply(text, rewrites),
+        rewrites=tuple(rewrites),
+        moves=moves,
+        gaps=tuple(
+            Gap(tag=tag, line=_the_line_the_gaps_land_on(place, under) + 1)
+            for place, tag in want
+        ),
     )
 
 
@@ -1149,14 +1243,25 @@ def _the_blank_lines_below(lines: list[str], where: int, keep: int) -> int:
 
 
 def _the_tag_opens_a_container(rest: str, lines: list[str], at: int) -> bool:
-    """Whether this tag holds a container rather than a value.
+    """Whether this tag holds a container rather than a value."""
+    return _the_brace_the_tag_opens(rest, lines, at) >= 0
+
+
+def _the_brace_the_tag_opens(rest: str, lines: list[str], at: int) -> int:
+    """The line holding the ``{`` a tag opens, or nothing when it opens none.
 
     The brace either sits after the name on the name's own line or waits on the
     line below, which are the two ways the codec reads a container; and they are
     the two ways ``_the_tag_takes_up_to`` knows where the block ends, so which
-    tags are containers and how far they reach are decided together.
+    tags are containers and how far they reach are decided together.  A brace
+    closed on the very line it opened on is a value, not a container, which is
+    how a kuid-table written on one line is read.
     """
-    return rest.startswith("{") or (not rest and _a_brace_is_next(lines, at + 1))
+    if rest.startswith("{") and not rest.endswith("}"):
+        return at  # the brace sits on the name's own line
+    if not rest and _a_brace_is_next(lines, at + 1):
+        return at + 1  # and the name's line holds nothing else
+    return -1
 
 
 def _the_order_they_should_be_in(blocks: list[_Block]) -> list[_Block]:
@@ -1208,19 +1313,124 @@ def _the_part_that_moves(
 
 
 def _the_tags_that_moved(
-    blocks: list[_Block], moving: list[_Block], first: int
+    blocks: list[_Block], moving: list[_Block], first: int, stand: dict[int, int]
 ) -> tuple[Move, ...]:
     """Which tags changed place, said in the order they stand in the text now.
 
-    The line a tag lands on is counted out of the blocks in front of it, since
-    every block carries exactly the lines it had and nothing is added or taken.
+    The line a tag lands on is looked up rather than counted out of the blocks in
+    front of it, because the blank lines opened under the containers change what
+    those blocks add up to.  Every line of a block that moves is in ``stand``,
+    since the move carries whole blocks between the two edges and nothing else.
     """
-    moves: list[Move] = []
-    line = blocks[first].first
-    for offset, block in enumerate(moving):
-        if block is not blocks[first + offset]:
-            moves.append(
-                Move(tag=block.tag, from_line=block.first + 1, to_line=line + 1)
+    return tuple(
+        Move(tag=block.tag, from_line=block.first + 1, to_line=stand[block.first] + 1)
+        for offset, block in enumerate(moving)
+        if block is not blocks[first + offset]
+    )
+
+
+@dataclass(frozen=True)
+class _Tag:
+    """One tag read out of a stretch of lines, with the lines it takes up.
+
+    ``brace`` is the line holding the ``{`` of a container, or -1 when the tag
+    holds a value: it is what tells the walk where to look for the subtags,
+    between the braces rather than through them.
+    """
+
+    tag: str
+    first: int
+    last: int
+    brace: int
+
+
+def _the_blank_lines_to_open(lines: list[str]) -> tuple[tuple[int, str], ...]:
+    """Where a blank line has to come in, and under which container's brace.
+
+    Every container is looked at, however deep inside the file it is, since the
+    gap between a container and the tag under it is what shows where the one ends
+    and the other begins.  Nothing goes in above another closing brace, which
+    would part a tag from the container it is written inside, and nothing at the
+    end of the file, which has no tag under it to separate.  A blank line already
+    there is left alone, since a second one would say the same thing twice.
+    """
+    wanted: list[tuple[int, str]] = []
+    for at, tag in _the_containers_that_close(lines):
+        below = lines[at + 1].strip() if at + 1 < len(lines) else ""
+        if below and not below.startswith("}"):
+            wanted.append((at, tag))
+    return tuple(wanted)
+
+
+def _the_containers_that_close(lines: list[str]) -> tuple[tuple[int, str], ...]:
+    """Every container in the text, as the line its brace closes on and its name.
+
+    The containers inside other containers are read the same way as the ones at
+    the top, each stretch between a pair of braces on its own, and what comes back
+    is in the order of the lines.  A stretch the codec cannot read is left out
+    rather than guessed at, which only ever happens below a container the caller
+    has already read without complaint.
+    """
+    found: list[tuple[int, str]] = []
+    todo: list[tuple[int, int]] = [(0, len(lines))]
+    while todo:
+        start, end = todo.pop()
+        tags, because = _the_tags_between(lines, start, end)
+        if because:
+            continue
+        for tag in tags:
+            if tag.brace >= 0:
+                found.append((tag.last, tag.tag))
+                todo.append((tag.brace + 1, tag.last))
+    found.sort()
+    return tuple(found)
+
+
+def _the_tags_between(
+    lines: list[str], start: int, end: int
+) -> tuple[list[_Tag], str]:
+    """The tags written between two lines, or why they cannot be told apart.
+
+    The walk is the codec's own: from a tag to the line its block ends on, and
+    from there to the next tag, so the lines of a value running over several
+    lines are never mistaken for tags.  ``start`` is where the tags may stand and
+    ``end`` is the ``}`` closing the container they are written inside, which is
+    not one of them; a tag reaching past it belongs to the container above rather
+    than to this one, and is said about rather than cut in half.  Blank lines are
+    passed over, and a brace that has no tag name above it is not a tag.
+    """
+    tags: list[_Tag] = []
+    at = start
+    while at < end:
+        if not lines[at].strip():
+            at += 1
+            continue
+        found = _A_NAME.match(lines[at])
+        if found is None:
+            return [], f"line {at + 1} holds {lines[at].strip()!r}, which is not a tag"
+        name = found.group(1)
+        rest = _the_rest_of(lines[at].strip())
+        last, because = _the_tag_takes_up_to(lines, at, rest)
+        if because:
+            return [], f"the {name} on line {at + 1} {because}"
+        if last >= end:
+            return [], f"the {name} on line {at + 1} is not closed in its container"
+        tags.append(
+            _Tag(
+                tag=name,
+                first=at,
+                last=last,
+                brace=_the_brace_the_tag_opens(rest, lines, at),
             )
-        line += block.last - block.first + 1
-    return tuple(moves)
+        )
+        at = last + 1
+    return tags, ""
+
+
+def _the_line_the_gaps_land_on(where: int, under: list[int]) -> int:
+    """Which line a line stands on once blank lines come in below other lines.
+
+    ``under`` holds the lines a blank line goes under, in the text before the
+    blank lines, and each one of them below a line pushes it down by a line.
+    """
+    return where + sum(1 for place in under if place < where)

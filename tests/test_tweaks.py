@@ -887,6 +887,7 @@ def test_the_containers_stay_in_the_order_they_were_found():
         'username "n"\n'
         'kind "interior"\n'
         "other-table\n{\n  b 2\n}\n"
+        "\n"
         "one-table\n{\n  a 1\n}\n"
     )
 
@@ -939,7 +940,9 @@ def test_kuid_table_and_obsolete_table_are_the_last_two_containers():
         '    mesh "a.im"\n'
         "  }\n"
         "}\n"
+        "\n"
         "kuid-table\n{\n}\n"
+        "\n"
         "obsolete-table\n{\n}\n"
     )
 
@@ -955,6 +958,7 @@ def test_the_last_two_containers_stay_last_when_only_one_of_them_is_there():
         'kuid <kuid:2:100>\n'
         'username "n"\n'
         "mesh-table\n{\n  b 2\n}\n"
+        "\n"
         "obsolete-table\n{\n  a 1\n}\n"
     )
 
@@ -970,6 +974,7 @@ def test_kuid_table_alone_comes_after_every_other_container():
         'kuid <kuid:2:100>\n'
         'kind "interior"\n'
         "mesh-table\n{\n  b 2\n}\n"
+        "\n"
         "kuid-table\n{\n  a 1\n}\n"
     )
 
@@ -1140,7 +1145,9 @@ def test_a_file_already_in_the_asked_for_order_is_left_as_it_is():
         'username "n"\n'
         'kind "interior"\n'
         "mesh-table\n{\n  a 1\n}\n"
+        "\n"
         "kuid-table\n{\n}\n"
+        "\n"
         "obsolete-table\n{\n}\n"
     )
     result = tweaks.reorder_tags(text)
@@ -1148,9 +1155,181 @@ def test_a_file_already_in_the_asked_for_order_is_left_as_it_is():
     assert result.text == text
     assert result.rewrites == ()
     assert result.moves == ()
+    assert result.gaps == ()
     assert not result.warning
     assert result.status == "Nothing was reordered"
     assert result.summary().startswith("Nothing was reordered")
+
+
+# ---------------------------------------------------------------------------
+# a blank line under every container
+# ---------------------------------------------------------------------------
+def test_a_blank_line_goes_under_a_container_even_when_no_tag_moves():
+    text = (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "kuid-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.moves == ()
+    assert result.status == "Added 1 blank line"
+    assert not result.warning
+    assert result.text == (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "\n"
+        "kuid-table\n{\n}\n"
+    )
+
+
+def test_the_blank_lines_go_under_the_containers_at_every_depth():
+    """The subtags of a container are separated from each other as well."""
+    text = (
+        'kind "scenery"\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "ind.im"\n'
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        "    other\n"
+        "    {\n"
+        "      a 1\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        "kuid-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == (
+        'kind "scenery"\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "ind.im"\n'
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        "\n"
+        "    other\n"
+        "    {\n"
+        "      a 1\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "kuid-table\n{\n}\n"
+    )
+    assert [one.tag for one in result.gaps] == ["effects", "mesh-table"]
+    assert result.status == "Added 2 blank lines"
+
+
+def test_no_blank_line_goes_above_a_closing_brace_or_at_the_end_of_the_file():
+    """A gap under the last subtag of a container would part it from its parent."""
+    text = (
+        'kind "scenery"\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "ind.im"\n'
+        "  }\n"
+        "}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.gaps == ()
+    assert result.status == "Nothing was reordered"
+
+
+def test_a_blank_line_that_is_already_there_is_left_as_it_is():
+    """The tweak opens out a container that had no gap; it does not count them."""
+    text = (
+        'kind "interior"\n'
+        "mesh-table\n{\n}\n"
+        "\n"
+        "\n"
+        "kuid-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.gaps == ()
+
+
+def test_a_container_that_stays_where_it_is_still_gets_its_blank_line():
+    """The container above the tags that moved is not left out of the change."""
+    text = (
+        'kuid <kuid:2:100>\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "obsolete-table\n{\n  b 2\n}\n"
+        "kuid-table\n{\n  c 3\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == (
+        'kuid <kuid:2:100>\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "\n"
+        "kuid-table\n{\n  c 3\n}\n"
+        "\n"
+        "obsolete-table\n{\n  b 2\n}\n"
+    )
+    assert [(one.tag, one.line) for one in result.gaps] == [
+        ("mesh-table", 5),
+        ("kuid-table", 10),
+    ]
+
+
+def test_a_tag_whose_braces_close_on_the_line_they_opened_is_a_value():
+    """One line, one value: the codec reads no container, so no gap goes under it."""
+    text = 'kind "x"\nkuid-table { a 1 }\nauthor "nobody"\n'
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == 'kind "x"\nauthor "nobody"\nkuid-table { a 1 }\n'
+    assert result.gaps == ()
+
+
+def test_the_blank_lines_named_are_the_ones_under_the_containers():
+    text = (
+        'kind "scenery"\n'
+        "mesh-table\n{\n  default\n{\n  mesh \"ind.im\"\n  }\n}\n"
+        "kuid-table\n{\n}\n"
+        'author "nobody"\n'
+    )
+    result = tweaks.reorder_tags(text)
+    lines = result.text.split("\n")
+
+    for gap in result.gaps:
+        assert lines[gap.line - 1].strip() == "}"
+        assert lines[gap.line] == ""
+
+
+def test_the_summary_says_which_containers_got_a_blank_line():
+    text = (
+        'kind "interior"\n'
+        'kuid <kuid:2:100>\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "kuid-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.status == "Reordered 2 tags, added 1 blank line"
+    assert result.summary() == (
+        "Reordered 2 tags, added 1 blank line:\n"
+        "\n"
+        "  kuid moved from line 2 to line 1\n"
+        "  kind moved from line 1 to line 2\n"
+        "  a blank line went under the mesh-table on line 6"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1166,6 +1345,22 @@ def test_reordering_loses_no_tag_and_needs_no_second_press():
         assert held(parse_text(once.text)) == held(parse_text(text)), name
         assert twice.text == once.text, name
         assert twice.status == "Nothing was reordered", name
+
+
+def test_a_real_asset_ends_up_with_a_blank_line_under_every_container():
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        text = read_text_file(SAMPLES / name)
+        lines = tweaks.reorder_tags(text).text.split("\n")
+
+        left_over = [
+            at + 1
+            for at, line in enumerate(lines)
+            if line.strip() == "}"
+            and at + 1 < len(lines)
+            and lines[at + 1].strip()
+            and not lines[at + 1].strip().startswith("}")
+        ]
+        assert not left_over, f"{name}: line {left_over}"
 
 
 def test_a_real_asset_ends_up_in_the_asked_for_order():
