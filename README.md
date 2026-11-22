@@ -100,9 +100,9 @@ are never part of it, and what is saved is plain text whatever a line looked lik
   then talked out of stops the whole thing.
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
-- **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
-  chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Syntax
-  check (F5), Exit.
+- **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Recent
+  files (the ten opened last, and Clear list), Save chump (Ctrl+S), Save chump
+  as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
@@ -145,6 +145,28 @@ container
   username                            "bcdf"
 }
 ```
+
+### Recent files
+
+**File > Recent files** lists the ten files opened last, newest first, and
+clicking one opens it again. The list keeps the whole name of each file, since
+the file's own name is the part that says what it is; a file that has gone
+missing since is still listed but greyed out, because the drive it was on may be
+away rather than gone. **Clear list**, always the last item, forgets all of them,
+and is greyed out when there is nothing to forget.
+
+An opening counts once however many times the same file is opened, and a file
+that would not open is not listed. The list is one small file of the program's
+own, kept with the themes:
+
+```
+%LOCALAPPDATA%\ChumpEditor\recent.json    (Windows)
+~/.config/ChumpEditor/recent.json         (elsewhere)
+```
+
+So it is the same list the next time the program starts, and a list you can read
+or delete by hand. Writing it is never part of opening a file: should the list
+refuse to be written, the file still opens and the status bar says so.
 
 ### Syntax check
 
@@ -439,13 +461,14 @@ src/chumpeditor/theme.py       the colour themes: the JSON format, reading and w
 src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
 src/chumpeditor/tweaks.py      the four tidy-ups of the way older files read: Tweaks does this
 src/chumpeditor/paths.py       where this program's own files are kept
+src/chumpeditor/recent.py      the ten files opened last: recent.json in that folder
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
 src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, about.py,
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         533 tests
+tests/                         563 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

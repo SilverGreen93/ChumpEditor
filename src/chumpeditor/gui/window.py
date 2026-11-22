@@ -2,8 +2,9 @@
 
 There is no queue here and nothing is converted beside it any more.  A file
 arrives - named on the command line, dropped on the window, picked in the Open
-dialog - its text form goes into the editor, and the window's title says which
-file that is and whether it has been changed since it was written.
+dialog or out of the list of files opened lately - its text form goes into the
+editor, and the window's title says which file that is and whether it has been
+changed since it was written.
 
 Writing the file back is the window's decision, not the editor's: *Save chump*
 packs the text into a binary file and *Export txt* writes the text form, and
@@ -33,6 +34,7 @@ from ..document import (
     save_text,
     suggested_path,
 )
+from ..recent import RecentFiles
 from .about import ABOUT_TITLE, about_html
 from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
@@ -98,6 +100,10 @@ class ChumpWindow(QMainWindow):
         #: the folder the last file came from or went to, to start a dialog in
         self._folder: Path | None = None
         self._message = ""
+        #: which files were opened lately, newest first; the file menu shows them
+        self.recent = RecentFiles()
+        #: the menu those names are written into, filled in by ``build_menus``
+        self.recent_menu = None
 
         self.editor = RichTextEditor(self)
         self.setCentralWidget(self.editor)
@@ -118,6 +124,10 @@ class ChumpWindow(QMainWindow):
         self.editor.files_dragging.connect(self._drop_hint)
 
         self.say(DROP_HINT)
+        if self.recent.broken:
+            # the list is a convenience, so a list that cannot be read is
+            # mentioned in the status bar and the program carries on without it
+            self.say(self.recent.broken)
 
         if paths:
             self.open_paths(paths)
@@ -137,6 +147,7 @@ class ChumpWindow(QMainWindow):
         self._folder = self.path.parent
         self._refresh_title()
         self.say(f"Opened {self.path.name}")
+        self.remember(self.path)
         return self.path
 
     def open_file(self, path: str | Path) -> bool:
@@ -178,6 +189,18 @@ class ChumpWindow(QMainWindow):
             self.say(f"Opened {opened.name}; one file at a time, so not {skipped}")
         return opened
 
+    def remember(self, path: Path) -> None:
+        """Note that ``path`` was opened, so the file menu can offer it again.
+
+        Only a file that came through is listed, which is why this is called at
+        the end of an opening.  Should the list itself refuse to be written, that
+        goes in the status bar; it is no reason to lose the file on screen.
+        """
+        self.recent.remember(path)
+        self.fill_recent_menu()
+        if self.recent.broken:
+            self.say(self.recent.broken)
+
     # -- the menus ------------------------------------------------------------
     def prompt_open(self) -> None:
         """File > Open: ask for a file, then open it if that is allowed.
@@ -192,6 +215,57 @@ class ChumpWindow(QMainWindow):
         )
         if name:
             self.open_file(name)
+
+    def open_recent(self, path: Path) -> None:
+        """File > Recent files: open one of the files opened lately.
+
+        Asked about before replacing, exactly as the Open item is: the text on
+        screen may be work that was never written out, and a name in a menu is no
+        reason to lose it.
+        """
+        if not self._ok_to_replace():
+            return
+        self.open_file(path)
+
+    def fill_recent_menu(self) -> None:
+        """Rewrite the Recent files menu: the names, then the way to forget them.
+
+        Written out whenever a file is opened and again whenever the menu is about
+        to be shown; with ten names at most there is nothing to gain by being
+        cleverer.  A file that has gone missing since it was opened stays listed -
+        it may be on a drive that is away - but is greyed out rather than promise
+        something that will fail.
+
+        The old items are set aside for the event loop to delete rather than
+        deleted here.  Choosing a name out of this menu comes back through this
+        method, so clearing the menu outright would take the very item away from
+        under Qt while it is still working out which item was chosen.
+        """
+        menu = self.recent_menu
+        if menu is None:
+            return
+        for action in menu.actions():
+            menu.removeAction(action)
+            action.deleteLater()
+        listed = self.recent.paths()
+        for path in listed:
+            action = menu.addAction(str(path))
+            action.setEnabled(path.is_file())
+            action.setToolTip(str(path))
+            action.triggered.connect(lambda _checked=False, one=path: self.open_recent(one))
+        if listed:
+            menu.addSeparator()
+        clear = menu.addAction("&Clear list")
+        clear.setEnabled(bool(listed))
+        clear.triggered.connect(self.clear_recent)
+
+    def clear_recent(self) -> None:
+        """File > Recent files > Clear list: forget which files were opened."""
+        self.recent.clear()
+        self.fill_recent_menu()
+        self.say("Cleared the list of recent files")
+        if self.recent.broken:
+            self.say(self.recent.broken)
 
     def save(self, *, ask: bool = False) -> Path | None:
         """File > Save chump: the text back into a binary config file."""

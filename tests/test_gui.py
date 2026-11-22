@@ -9,6 +9,7 @@ samples of ``test_files`` are copied into a scratch folder first.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from chumpeditor import __version__  # noqa: E402
+from chumpeditor import __version__, recent  # noqa: E402
 from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file  # noqa: E402
 from chumpeditor.document import (  # noqa: E402
     ALL_SUFFIXES,
@@ -56,6 +57,7 @@ from chumpeditor.gui.resources import (  # noqa: E402
     window_icon,
 )
 from chumpeditor.gui.window import REPORT_LIMIT, UNTITLED  # noqa: E402
+from chumpeditor.recent import recent_file  # noqa: E402
 
 SAMPLES = Path(__file__).parent / "test_files"
 
@@ -105,6 +107,21 @@ def dialogs(monkeypatch):
     return shown
 
 
+@pytest.fixture(autouse=True)
+def settings(monkeypatch, tmp_path_factory):
+    """The folder the program keeps its own files in, moved to the scratch folder.
+
+    The list of files opened lately is written as soon as a file is opened, so
+    every window here has to be pointed at a folder that gets thrown away: a
+    test run has no business filling in your real settings.  It is a folder of
+    its own, beside the one a test writes its files into, so a test that counts
+    what the editor wrote is not counting the list as well.
+    """
+    folder = tmp_path_factory.mktemp("settings")
+    monkeypatch.setattr(recent, "config_dir", lambda: folder)
+    return folder
+
+
 @pytest.fixture
 def picks(monkeypatch):
     """The dialogs that ask for a name, with the answers handed to them.
@@ -136,7 +153,7 @@ class _Picks:
 
 
 @pytest.fixture
-def window(qapp):
+def window(qapp, settings):
     return ChumpWindow()
 
 
@@ -614,6 +631,14 @@ def labels(menu) -> list[str]:
     return ["-" if action.isSeparator() else plain(action.text()) for action in menu.actions()]
 
 
+def sub_of(window, menu_name: str, label: str):
+    """A menu inside a menu, found by its name."""
+    for action in menu_of(window, menu_name).actions():
+        if action.menu() is not None and plain(action.text()) == label:
+            return action.menu()
+    raise AssertionError(f"{menu_name} has no {label!r} submenu")
+
+
 def item(window, menu_name: str, label: str):
     for action in menu_of(window, menu_name).actions():
         if plain(action.text()) == label:
@@ -638,6 +663,7 @@ def test_the_menu_bar_offers_file_edit_tweaks_and_help(window):
 def test_the_file_menu_offers_open_then_writing_then_a_check_then_exit(window):
     assert labels(menu_of(window, "File")) == [
         "Open file...",
+        "Recent files",
         "-",
         "Save chump", "Save chump as...",
         "-",
@@ -1559,6 +1585,152 @@ def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path
     assert window.editor.document().isModified()
     assert window.windowTitle() == f"config1.chump * - {APP_TITLE}"
     assert list(tmp_path.glob("*.chump")) == [source]
+
+
+# ---------------------------------------------------------------------------
+# File > Recent files: the last files opened, so they can be opened again
+# ---------------------------------------------------------------------------
+def recent_menu(window):
+    """The Recent files submenu, as it sits in the File menu."""
+    return sub_of(window, "File", "Recent files")
+
+
+def recent_labels(window) -> list[str]:
+    """What the Recent files menu offers, in order."""
+    return labels(recent_menu(window))
+
+
+def recent_item(window, label: str):
+    for action in recent_menu(window).actions():
+        if plain(action.text()) == label:
+            return action
+    raise AssertionError(f"Recent files has no {label!r} item")
+
+
+def lately(window) -> list[str]:
+    """Only the file names the menu offers, without the tail of the menu."""
+    return [one for one in recent_labels(window) if one not in ("-", "Clear list")]
+
+
+def test_a_window_that_has_opened_nothing_offers_only_an_empty_clear(window):
+    assert recent_labels(window) == ["Clear list"]
+    assert not recent_item(window, "Clear list").isEnabled()
+
+
+def test_the_files_opened_lately_are_listed_newest_first(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    assert recent_labels(window) == [str(second), str(first), "-", "Clear list"]
+    assert recent_item(window, "Clear list").isEnabled()
+
+
+def test_choosing_a_name_from_the_menu_opens_that_file(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    recent_item(window, str(first)).trigger()
+    assert window.path == first
+    assert parse_text(text_of(window.editor)) == load_chump(first)
+    assert recent_labels(window) == [str(first), str(second), "-", "Clear list"]
+
+
+def test_choosing_a_name_when_there_is_unwritten_work_asks_first(window, tmp_path, dialogs):
+    """A name in a menu is no reason to throw away what is on screen."""
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    window.editor.insertPlainText("x")
+    recent_item(window, str(first)).trigger()
+    assert dialogs[-1][0] == "question"
+    assert window.path == first
+
+
+def test_a_file_opened_twice_is_only_listed_once(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    window.open_path(first)
+    assert lately(window) == [str(first), str(second)]
+
+
+def test_the_menu_holds_the_ten_most_recent_openings(window, tmp_path):
+    for number in range(12):
+        one = tmp_path / f"config{number}.txt"
+        one.write_text("kuid <kuid:123:456>\n", encoding="utf-8")
+        window.open_path(one)
+    newest_first = [str(tmp_path / f"config{n}.txt") for n in range(11, 1, -1)]
+    assert len(newest_first) == 10
+    assert lately(window) == newest_first
+
+
+def test_a_file_that_has_gone_is_listed_but_greyed(window, tmp_path):
+    """The drive it was on may be away; the name is worth keeping either way."""
+    one = copy("config1.chump", tmp_path)
+    window.open_path(one)
+    one.unlink()
+    window.fill_recent_menu()  # which is what opening the menu does
+    assert lately(window) == [str(one)]
+    assert not recent_item(window, str(one)).isEnabled()
+
+
+def test_clearing_the_list_takes_every_name_away(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    recent_item(window, "Clear list").trigger()
+    assert recent_labels(window) == ["Clear list"]
+    assert not recent_item(window, "Clear list").isEnabled()
+    assert window.statusBar().currentMessage() == "Cleared the list of recent files"
+    assert window.path == second  # the file on screen is left alone
+
+
+def test_the_list_is_still_there_for_the_next_window(window, tmp_path):
+    first = copy("config1.chump", tmp_path)
+    second = copy("semnal.chump", tmp_path)
+    window.open_path(first)
+    window.open_path(second)
+    again = ChumpWindow()
+    try:
+        assert lately(again) == [str(second), str(first)]
+    finally:
+        again.close()
+
+
+def test_a_file_named_on_the_command_line_is_listed_too(qapp, tmp_path):
+    one = copy("config1.chump", tmp_path)
+    shown = ChumpWindow(paths=[str(one)])
+    try:
+        assert lately(shown) == [str(one)]
+    finally:
+        shown.close()
+
+
+def test_the_list_lives_in_the_programs_own_folder(window, settings, tmp_path):
+    """The list is a setting of the program, kept where the themes are."""
+    one = copy("config1.chump", tmp_path)
+    window.open_path(one)
+    assert recent_file() == settings / "recent.json"
+    assert json.loads(recent_file().read_text(encoding="utf-8")) == [str(one)]
+
+
+def test_a_list_that_cannot_be_read_is_said_and_done_without(qapp, settings, tmp_path):
+    """A broken list is a lost convenience, not a reason to fail to open."""
+    (settings / "recent.json").write_text("{not a list at all}", encoding="utf-8")
+    shown = ChumpWindow()
+    try:
+        assert "recent files" in shown.statusBar().currentMessage()
+        assert recent_labels(shown) == ["Clear list"]
+        one = copy("config1.chump", tmp_path)
+        shown.open_path(one)
+        assert lately(shown) == [str(one)]
+    finally:
+        shown.close()
 
 
 # ---------------------------------------------------------------------------

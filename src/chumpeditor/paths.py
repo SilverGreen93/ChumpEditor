@@ -2,8 +2,8 @@
 
 Free of Qt so the rest of the package can ask where things are without a
 window.  Everything else is a file whose name the user chooses; this is only
-for the files this program reads on its own, of which there is one kind so far:
-themes.
+for the files this program reads and writes on its own, of which there are two
+kinds: themes, and the list of the files opened lately.
 """
 
 from __future__ import annotations

@@ -36,6 +36,9 @@ def _file(menu, window: QMainWindow) -> None:
     it, and finish."""
     _add(menu, "&Open file...", QKeySequence.StandardKey.Open, window.prompt_open)
 
+    # the files opened lately, so a person does not have to hunt for them again
+    _recent(menu.addMenu("Recent &files"), window)
+
     menu.addSeparator()
     _add(menu, "&Save chump", QKeySequence.StandardKey.Save, lambda: window.save())
     _add(menu, "Save chump &as...", None, lambda: window.save(ask=True))
@@ -50,6 +53,18 @@ def _file(menu, window: QMainWindow) -> None:
 
     menu.addSeparator()
     _add(menu, "E&xit", QKeySequence.StandardKey.Quit, window.close)
+
+
+def _recent(menu, window: QMainWindow) -> None:
+    """The files opened lately, newest first, and one item to forget them.
+
+    The names change as files are opened, so the menu is written out as they are
+    opened and again as the menu opens: see ``window.fill_recent_menu``.  The
+    window keeps hold of this menu because it is the window that rewrites it.
+    """
+    window.recent_menu = menu
+    menu.aboutToShow.connect(window.fill_recent_menu)
+    window.fill_recent_menu()
 
 
 def _edit(menu, editor):
