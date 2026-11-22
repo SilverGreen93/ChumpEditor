@@ -176,6 +176,16 @@ def copy(sample: str, folder: Path) -> Path:
     return target
 
 
+def read_as_written(path: Path) -> str:
+    """A text file as it stands on disk, line endings and all.
+
+    ``Path.read_text`` only grew a ``newline`` argument in 3.13 and the package
+    still supports 3.9, so the file is opened with ``open`` and read whole.
+    """
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        return stream.read()
+
+
 def flat(text: str) -> str:
     """Line endings as one kind, so text can be compared across the editor."""
     return text.replace("\r\n", "\n").replace("\r", "\n")
@@ -1805,7 +1815,7 @@ def test_exporting_a_text_file_keeps_it_where_it_stands(window, tmp_path):
 def test_exporting_keeps_the_spacing_the_editor_has(window, picks, tmp_path):
     replace(window, 'kuid    <kuid:2:2>\nname "two  spaces"\n')
     picks.choose.append(str(tmp_path / "kept.txt"))
-    assert window.export().read_text(encoding="utf-8-sig", newline="") == (
+    assert read_as_written(window.export()) == (
         'kuid    <kuid:2:2>\r\nname "two  spaces"\r\n'
     )
 

@@ -27,7 +27,13 @@ def copy(sample: str, folder: Path) -> Path:
 
 
 def read_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8-sig", newline="")
+    """A text file as it stands on disk, line endings and all.
+
+    ``Path.read_text`` only grew a ``newline`` argument in 3.13 and the package
+    still supports 3.9, so the file is opened with ``open`` and read whole.
+    """
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        return stream.read()
 
 
 # ---------------------------------------------------------------------------

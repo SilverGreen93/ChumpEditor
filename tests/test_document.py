@@ -31,6 +31,16 @@ def copy(sample: str, folder: Path) -> Path:
     return target
 
 
+def read_as_written(path: Path) -> str:
+    """A text file as it stands on disk, line endings and all.
+
+    ``Path.read_text`` only grew a ``newline`` argument in 3.13 and the package
+    still supports 3.9, so the file is opened with ``open`` and read whole.
+    """
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        return stream.read()
+
+
 # ---------------------------------------------------------------------------
 # what can be opened
 # ---------------------------------------------------------------------------
@@ -80,7 +90,7 @@ def test_the_text_a_chump_opens_with_reads_back_as_the_same_tags(tmp_path):
 
 def test_opening_a_txt_shows_the_file_as_it_stands(tmp_path):
     source = copy("config2.txt", tmp_path)
-    assert read_document(source) == source.read_text(encoding="utf-8-sig", newline="")
+    assert read_document(source) == read_as_written(source)
 
 
 def test_the_bom_of_a_text_file_is_not_part_of_the_text(tmp_path):
@@ -202,7 +212,7 @@ def test_exporting_writes_the_bom_and_crlf_the_format_uses(tmp_path):
 
 def test_exporting_leaves_the_spacing_of_the_editor_alone(tmp_path):
     target = save_text("kuid   <kuid:1:2>\nname\ttabbed\n", tmp_path / "spaced.txt")
-    assert target.read_text(encoding="utf-8-sig", newline="") == (
+    assert read_as_written(target) == (
         "kuid   <kuid:1:2>\r\nname\ttabbed\r\n"
     )
 

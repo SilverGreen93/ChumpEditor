@@ -53,6 +53,16 @@ INT64 = TagType.INT64
 KUID = TagType.KUID
 
 
+def read_as_written(path: Path) -> str:
+    """A text file as it stands on disk: BOM off, line endings exactly as they are.
+
+    ``Path.read_text`` only grew a ``newline`` argument in 3.13 and the package
+    still supports 3.9, so the file is opened with ``open`` and read whole.
+    """
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        return stream.read()
+
+
 def tag_bytes(name: str, value_type: int, value: bytes = b"", *, encoding: str = "utf-8") -> bytes:
     """One tag as the format frames it: length, name, NUL, type byte, value.
 
@@ -1107,7 +1117,7 @@ def test_the_sample_text_files_pack_back_to_their_binaries():
 
 
 def test_config2_is_rendered_exactly_as_its_text_file():
-    on_disk = (SAMPLES / "config2.txt").read_text(encoding="utf-8-sig", newline="")
+    on_disk = read_as_written(SAMPLES / "config2.txt")
     assert render_text(load_chump(SAMPLES / "config2.chump")) == on_disk
 
 
@@ -1115,14 +1125,14 @@ def test_config1_is_rendered_like_its_text_file_apart_from_the_edited_lines():
     # config1.txt went through a text editor after the expander wrote it: the
     # username, one mesh name and one kuid were changed by hand
     rendered = render_text(load_chump(SAMPLES / "config1.chump")).split("\r\n")
-    on_disk = (SAMPLES / "config1.txt").read_text(encoding="utf-8-sig", newline="").split("\r\n")
+    on_disk = read_as_written(SAMPLES / "config1.txt").split("\r\n")
     assert len(rendered) == len(on_disk)
     differing = [disk for line, disk in zip(rendered, on_disk) if line != disk]
     assert [line.split()[0] for line in differing] == ["username", "mesh", "kuid"]
 
 
 def test_config1_agrees_with_its_text_file_about_the_tag_tree():
-    text = parse_text((SAMPLES / "config1.txt").read_text(encoding="utf-8-sig", newline=""))
+    text = parse_text(read_as_written(SAMPLES / "config1.txt"))
     chump = load_chump(SAMPLES / "config1.chump")
     assert names(text) == names(chump)
     assert [tag.value_type for tag in text.tags] == [tag.value_type for tag in chump.tags]
@@ -1183,9 +1193,7 @@ def test_a_text_file_without_a_byte_order_mark_reads_the_same():
 def test_dump_text_writes_the_text_form_of_a_tree(tmp_path):
     target = tmp_path / "out" / "config.txt"
     dump_text(load_chump(SAMPLES / "config2.chump"), target)
-    assert parse_text(target.read_text(encoding="utf-8-sig", newline="")) == load_chump(
-        SAMPLES / "config2.chump"
-    )
+    assert parse_text(read_as_written(target)) == load_chump(SAMPLES / "config2.chump")
 
 
 def test_dump_text_honours_the_line_ending(tmp_path):
@@ -1205,7 +1213,8 @@ def test_dump_chump_writes_bytes_that_read_back(tmp_path):
 
 def test_a_text_file_written_by_hand_packs_into_a_chump_file(tmp_path):
     source = tmp_path / "hand.txt"
-    source.write_text("k 1\nera\n", newline="")
+    with source.open("w", encoding="utf-8", newline="") as stream:  # keep the LF endings
+        stream.write("k 1\nera\n")
     dump_chump(parse_text(source.read_text()), tmp_path / "hand.chump")
     assert parse_chump((tmp_path / "hand.chump").read_bytes()) == parse_text(
         source.read_text()
@@ -1236,9 +1245,7 @@ def test_a_cdp_file_is_a_chump_file_under_another_name(tmp_path):
     source.write_bytes((SAMPLES / "config1.chump").read_bytes())
     target = convert_file(source)
     assert target == tmp_path / "config.txt"
-    assert parse_text(target.read_text(encoding="utf-8-sig", newline="")) == load_chump(
-        SAMPLES / "config1.chump"
-    )
+    assert parse_text(read_as_written(target)) == load_chump(SAMPLES / "config1.chump")
 
 
 def test_an_explicit_target_is_used_as_it_is(tmp_path):
