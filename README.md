@@ -5,10 +5,11 @@
 Editor for config.chump or config.txt files.
 
 Features:
+
 - Can convert Trainz `.chump` files - the binary form of an asset's `config.txt` - to and from their readable text form.
 - Can be used directly as an editor for config.txt/config.chump files
 - Contains tweaks to modernize obsolete config files (see below)
-- Offers syntax highlighting
+- Offers syntax highlighting and line numbers
 
 ![screenshot](assets/screenshot.png)
 
@@ -79,9 +80,9 @@ writes binary.
 ## GUI
 
 The main area is one rich text editor: the text form of a file in a fixed width
-font, coloured by keyword. The colours are paint rather than content - undo only
-ever goes back over the text, and what is saved is plain text whatever a line
-looked like.
+font, coloured by keyword, with the lines numbered down the left. The colours are
+paint rather than content - undo only ever goes back over the text, the numbers
+are never part of it, and what is saved is plain text whatever a line looked like.
 
 - Name a `.chump`, `.cdp` or `.txt` on the command line, or drop one anywhere on
   the window (including onto the text), and it opens straight in the editor; a
@@ -106,8 +107,9 @@ looked like.
 Neither Save nor Export writes a file the format would refuse. The text on screen
 is read and checked first: a container whose `{` / `}` pair is missing a half,
 quote marks that do not come in twos, a quote mark in a tag name, and half a kuid
-(`<kuid:1:2` or `kuid:1:2>`) are named with their line number instead of going to
-disk. The quote pairing is the part that reading alone cannot catch: a
+(`<kuid:1:2` or `kuid:1:2>`) are named with their line number - counted the same
+way as the numbers down the side of the text - instead of going to disk. The
+quote pairing is the part that reading alone cannot catch: a
 `kind "interior` that lost its closing quote runs on through the tags after it and
 stops at the quote meant to open the next value, so the file still reads - it just
 reads as one long value instead of several. Inside a quoted value the marks still
@@ -359,7 +361,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         466 tests
+tests/                         476 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QUrl  # noqa: E402
+from PyQt6.QtCore import QPoint, QUrl  # noqa: E402
 from PyQt6.QtGui import QDragLeaveEvent  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QMessageBox,
     QPushButton,
     QTextEdit,
+    QWidget,
 )
 
 from chumpeditor import __version__  # noqa: E402
@@ -451,6 +452,146 @@ def test_round_tripping_a_sample_through_the_editor_packs_the_same_bytes(window,
     window.open_path(source)
     written = save_chump(window.editor.toPlainText(), tmp_path / "back.chump")
     assert written.read_bytes() == source.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# the line numbers down the side of the text
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def shown(window, qapp):
+    """The window, on screen.
+
+    Which lines are in sight, and how far down each of them sits, are questions
+    about a laid out document; a window that was never shown has no width to lay
+    one out in, and every line in it is at the top.
+    """
+    window.resize(700, 400)
+    window.show()
+    qapp.processEvents()
+    return window
+
+
+def lines_of(count: int) -> str:
+    """A file of exactly that many lines, each named after its own number."""
+    return "\n".join(f"tag {number}" for number in range(1, count + 1))
+
+
+def test_the_numbers_are_part_of_the_editor(window):
+    """A strip of its own beside the text, not text written into the document:
+    a number can never be selected, deleted, saved or reordered by accident."""
+    assert isinstance(window.editor.gutter, QWidget)
+    assert window.editor.gutter.parentWidget() is window.editor
+
+
+def test_the_lines_are_numbered_from_one(shown):
+    shown.editor.setPlainText(lines_of(60))
+    numbers = [number for number, _, _ in shown.editor.visible_lines()]
+    assert numbers == list(range(1, len(numbers) + 1))
+    assert 1 < len(numbers) < 60  # the file is longer than the window is
+
+
+def test_a_number_is_level_with_the_line_it_numbers(shown):
+    """The one thing a ruler is for: the number has to be beside the line it
+    names.  The text is asked which line sits at that height, which is the same
+    way a click in the text finds out, so the two answers have to agree."""
+    shown.editor.setPlainText(lines_of(60))
+    for number, top, height in shown.editor.visible_lines():
+        line = shown.editor.cursorForPosition(QPoint(2, top + height // 2))
+        assert line.blockNumber() + 1 == number
+
+
+def test_the_numbers_are_still_right_at_the_bottom_of_a_long_file(shown, qapp):
+    """The numbering comes from the document rather than from what happened to be
+    at the top when the file opened, so a scroll changes which lines are named
+    and nothing else."""
+    shown.editor.setPlainText(lines_of(600))
+    qapp.processEvents()  # the file is scrolled once it has been laid out
+    shown.editor.verticalScrollBar().setValue(shown.editor.verticalScrollBar().maximum())
+    qapp.processEvents()
+    lines = shown.editor.visible_lines()
+    assert [number for number, _, _ in lines][-1] == 600
+    for number, top, height in lines:
+        if top >= 0:
+            line = shown.editor.cursorForPosition(QPoint(2, top + height // 2))
+            assert line.blockNumber() + 1 == number
+
+
+def test_the_room_for_the_numbers_is_not_a_seesaw(shown):
+    """The strip is as wide as its widest possible number, three digits at the
+    least, so a file growing past ninety-nine lines does not slide the text
+    sideways and a small file does not leave a gap to be filled."""
+    widths = set()
+    for count in (1, 9, 99, 999):
+        shown.editor.setPlainText(lines_of(count))
+        assert shown.editor.viewportMargins().left() == shown.editor.gutter_width()
+        widths.add(shown.editor.gutter_width())
+    assert len(widths) == 1
+    shown.editor.setPlainText(lines_of(1000))
+    assert shown.editor.gutter_width() > widths.pop()
+
+
+def test_the_numbers_stand_clear_of_the_text(shown):
+    """The room beside the text is reserved for the strip and the strip stands
+    in it, top for top and bottom for bottom."""
+    strip = shown.editor.gutter.geometry()
+    text = shown.editor.viewport().geometry()
+    assert strip.width() == shown.editor.gutter_width() > 0
+    assert strip.right() < text.left()
+    assert strip.top() == text.top()
+    assert strip.height() == text.height()
+
+
+def test_the_numbers_stop_where_the_text_does_when_a_bar_arrives(shown, qapp):
+    """A line too wide for the window brings a sideways bar in underneath the
+    text; the text area gets shorter, and the strip has to stop with it instead
+    of running on behind the bar."""
+    before = shown.editor.viewport().height()
+    shown.editor.setPlainText("x" * 6000)
+    qapp.processEvents()
+    assert shown.editor.viewport().height() < before
+    assert shown.editor.gutter.height() == shown.editor.viewport().height()
+
+
+def test_the_numbers_keep_up_when_the_window_changes_shape(shown, qapp):
+    """The strip follows the text area wherever the layout puts it, rather than
+    being stood once beside a text area that has since moved."""
+    shown.editor.setPlainText(lines_of(400))
+    qapp.processEvents()
+    before = shown.editor.gutter.geometry()
+    shown.resize(420, 260)
+    qapp.processEvents()
+    strip, text = shown.editor.gutter.geometry(), shown.editor.viewport().geometry()
+    assert strip != before
+    assert strip.top() == text.top()
+    assert strip.height() == text.height()
+
+
+def test_a_line_wrapped_across_the_window_keeps_one_number(shown, qapp):
+    """The reader's line 40 is the document's line 40, whatever the word wrap
+    makes of it in between: a wrapped line is numbered once, at its first line."""
+    shown.editor.set_line_wrap(True)
+    shown.editor.setPlainText("x" * 6000)
+    qapp.processEvents()
+    assert shown.editor.document().blockCount() == 1
+    assert [number for number, _, _ in shown.editor.visible_lines()] == [1]
+
+
+def test_the_numbers_follow_an_edit_and_one_press_of_undo(shown, qapp):
+    def last_line_in_sight() -> int:
+        qapp.processEvents()
+        bar = shown.editor.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+        return [number for number, _, _ in shown.editor.visible_lines()][-1]
+
+    shown.editor.setPlainText(lines_of(60))
+    assert last_line_in_sight() == 60
+    cursor = shown.editor.textCursor()
+    cursor.movePosition(cursor.MoveOperation.End)
+    cursor.insertText("\ntag 61\ntag 62")
+    assert last_line_in_sight() == 62
+    shown.editor.undo()
+    assert last_line_in_sight() == 60
 
 
 # ---------------------------------------------------------------------------

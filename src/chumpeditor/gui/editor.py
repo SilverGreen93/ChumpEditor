@@ -9,22 +9,27 @@ text came from is the window's business, not this widget's.  When the window
 asks for a change to the text it is made here, in place and in one undo step,
 because this is the only place the document can be edited without losing where
 the caret was.
+
+A ruler of line numbers runs down the left, which is a strip of its own beside
+the text rather than anything written into it: the numbers count the lines of
+the *document*, and the whole point is that they stay right when a line is
+edited, undone or re-wrapped without end.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PyQt6.QtCore import QEvent, pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase, QPalette, QTextCursor
-from PyQt6.QtWidgets import QTextEdit
+from PyQt6.QtCore import QEvent, QRect, Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QFontDatabase, QPainter, QPalette, QTextCursor
+from PyQt6.QtWidgets import QTextEdit, QWidget
 
 from ..theme import Theme, default_theme
 from ..tweaks import Rewrite
 from .drops import accept_file_drop, dropped_paths
 from .highlighter import ThemeHighlighter
 
-__all__ = ["RichTextEditor", "code_font"]
+__all__ = ["LineNumberArea", "RichTextEditor", "code_font"]
 
 #: tried in order; the first one the system has is used as-is
 PREFERRED_MONO = (
@@ -39,6 +44,15 @@ PREFERRED_MONO = (
 
 FONT_POINT_SIZE = 11
 
+#: blank either side of a number, in pixels, so nothing is jammed against a rule
+GUTTER_SIDE = 8
+#: the smallest the strip is ever allowed to be, in digits, so a file growing
+#: past 99 lines does not shove the text sideways on the two-hundred-and-first
+GUTTER_MIN_DIGITS = 3
+#: how far the numbers are dimmed from the text, out of 255: they are a ruler
+#: rather than the thing being read, and the lightest text is the keyword
+GUTTER_ALPHA = 110
+
 
 def code_font() -> QFont:
     """A fixed-width font, so the column-40 values of a config line up."""
@@ -49,6 +63,23 @@ def code_font() -> QFont:
     font.setFixedPitch(True)
     font.setPointSize(FONT_POINT_SIZE)
     return font
+
+
+class LineNumberArea(QWidget):
+    """The strip of line numbers down the left of the text.
+
+    A widget of our own rather than part of the text, so the text keeps every
+    one of its scrollbars, its selection and its editing behaviour untouched.
+    It only paints: the editor tells it where to sit, when it needs redrawing
+    and in what colour, because all of that follows the text beside it.
+    """
+
+    def __init__(self, editor: "RichTextEditor") -> None:
+        super().__init__(editor)
+        self._editor = editor
+
+    def paintEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        self._editor.paint_gutter(event)
 
 
 class RichTextEditor(QTextEdit):
@@ -69,6 +100,144 @@ class RichTextEditor(QTextEdit):
         self.highlighter = ThemeHighlighter(
             self.document(), theme or default_theme(), self.on_dark_background()
         )
+        self._setup_gutter()
+
+    # ------------------------------------------------------------------ lines
+
+    def _setup_gutter(self) -> None:
+        """Put the line numbers in and make room for them beside the text."""
+        self.gutter = LineNumberArea(self)
+        self._place_gutter()
+        # the text area is what the strip has to keep level with, and it settles
+        # whenever it likes - the scrollbars only arrive once the window is on
+        # screen, a window changing shape moves them about, soft wrap brings the
+        # sideways bar in and out - and there is no one signal for all of it, so
+        # the strip is stood again on anything the text area says
+        self.viewport().installEventFilter(self)
+        # the text asks for its own repaints and the strip is not text, so the
+        # ask is copied over to it, and the scrollbar's is copied too because a
+        # scroll moves the text out from under numbers that have not moved
+        self.document().documentLayout().update.connect(self._repaint_gutter)
+        self.verticalScrollBar().valueChanged.connect(self._repaint_gutter)
+        # one line more or less is one line more or less of room as well
+        self.document().contentsChanged.connect(self._lines_changed)
+        self._lines_changed()
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802 - Qt's name
+        """Keep the strip level with the text area, which settles late.
+
+        The text area is not the size it ends up being until the window is on
+        screen: the scrollbars are only made at show time, and the sideways bar
+        comes and goes with the length of the longest line.  Nothing announces
+        all of that together, so the strip is stood again on anything at all
+        happening to the text area, and only moved when it is out of place.
+        """
+        if watched is self.viewport():
+            self._place_gutter()
+        return super().eventFilter(watched, event)
+
+    def gutter_width(self) -> int:
+        """How wide the strip has to be: the widest the file can make it.
+
+        Three digits at least, because a two-line file getting a third line
+        must not shove the text over, and the width of a digit rather than the
+        text's own because the numbers are the same face as the text.
+        """
+        digits = max(GUTTER_MIN_DIGITS, len(str(self.document().blockCount())))
+        return 2 * GUTTER_SIDE + digits * self.fontMetrics().horizontalAdvance("9")
+
+    def _place_gutter(self) -> None:
+        """Stand the strip in the room reserved for it, between the frame and
+        the text.
+
+        Reserving the room is not the same as using it: ``setViewportMargins``
+        only pushes the text area aside, and a child widget goes nowhere until
+        it is told where.  It is measured off the text area rather than off the
+        frame so that it lines up with it exactly, top for top and bottom for
+        bottom, whatever the scrollbars have taken.
+        """
+        box = self.viewport().geometry()
+        width = self.gutter_width()
+        place = QRect(box.left() - width, box.top(), width, box.height())
+        if self.gutter.geometry() != place:
+            self.gutter.setGeometry(place)
+
+    def _lines_changed(self) -> None:
+        """Re-reserve the room whenever the number of lines could have changed."""
+        width = self.gutter_width()
+        if width != self.viewportMargins().left():
+            self.setViewportMargins(width, 0, 0, 0)
+        self._place_gutter()
+        self._repaint_gutter()
+
+    def _repaint_gutter(self, *_: object) -> None:
+        """Ask for the strip to be redrawn, in full, whenever anything moved.
+
+        Both signals that prompt it report something about the *text* - a
+        rectangle of it, or a scroll position - and neither is of any use to the
+        strip: the numbers move with every scroll and every edit, and a scroll
+        does not move the strip with them, so anything less than a full repaint
+        leaves numbers sitting where other numbers used to be.
+
+        Before the strip has been made there is nothing to repaint, which
+        happens: the palette is polished while the widget is still being built.
+        """
+        if getattr(self, "gutter", None) is not None:
+            self.gutter.update()
+
+    def visible_lines(self) -> list[tuple[int, int, int]]:
+        """The lines of text in sight, each as its number, the height of its top
+        edge in the strip, and its own height.
+
+        Those heights are the document's moved up by however far the text has
+        been scrolled, so a line scrolled half out of sight is still listed -
+        half a number is what is in sight of it.  A soft-wrapped line is listed
+        once, at its first visual line, which is the only numbering that stays
+        true to what the reader calls line 40.
+
+        The walk starts from a binary search rather than from line one, because
+        a config file runs to thousands of lines and a repaint follows every
+        scroll.  That search is legal because the tops of the blocks only ever
+        go down the document.
+        """
+        doc = self.document()
+        layout = doc.documentLayout()
+        scrolled = self.verticalScrollBar().value()
+        low, high = 0, doc.blockCount() - 1
+        while low < high:
+            middle = (low + high) // 2
+            if round(layout.blockBoundingRect(doc.findBlockByNumber(middle)).top()) > scrolled:
+                high = middle
+            else:
+                low = middle + 1
+        seen: list[tuple[int, int, int]] = []
+        block = doc.findBlockByNumber(max(0, low - 1))
+        while block.isValid():
+            edge = layout.blockBoundingRect(block)
+            top = round(edge.top()) - scrolled
+            if top >= self.viewport().height():
+                break
+            if top + round(edge.height()) >= 0:
+                seen.append((block.blockNumber() + 1, top, round(edge.height())))
+            block = block.next()
+        return seen
+
+    def paint_gutter(self, event) -> None:
+        """Draw the numbers that are in sight, and only what was asked for."""
+        box = self.gutter.rect().intersected(event.rect())
+        if box.isNull():
+            return
+        painter = QPainter(self.gutter)
+        painter.setClipRect(box)
+        painter.fillRect(box, self.palette().color(QPalette.ColorRole.Base))
+        dim = self.palette().color(QPalette.ColorRole.Text)
+        dim.setAlpha(GUTTER_ALPHA)
+        painter.setFont(self.font())
+        painter.setPen(dim)
+        for number, top, height in self.visible_lines():
+            painter.drawText(QRect(GUTTER_SIDE, top, box.width() - 2 * GUTTER_SIDE, height),
+                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop, str(number))
+        painter.end()
 
     def on_dark_background(self) -> bool:
         """Whether this text sits on a dark background.
@@ -91,6 +260,10 @@ class RichTextEditor(QTextEdit):
         highlighter = getattr(self, "highlighter", None)
         if highlighter is not None and event.type() == QEvent.Type.PaletteChange:
             highlighter.set_dark(self.on_dark_background())
+            # the numbers are painted from the same palette, so they are asked
+            # for as well; Qt repaints the text for a palette of its own, but a
+            # widget of ours beside it is left to us
+            self._repaint_gutter()
 
     def set_theme(self, theme: Theme) -> None:
         """Change the colours, and put the new ones over the text."""
