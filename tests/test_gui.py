@@ -19,10 +19,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QPoint, QUrl  # noqa: E402
-from PyQt6.QtGui import QDragLeaveEvent  # noqa: E402
+from PyQt6.QtCore import QEvent, QPoint, Qt, QUrl  # noqa: E402
+from PyQt6.QtGui import QDragLeaveEvent, QKeyEvent, QKeySequence, QTextCursor  # noqa: E402
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
+    QDockWidget,
     QFileDialog,
     QListWidget,
     QMessageBox,
@@ -208,9 +209,15 @@ def test_the_main_area_is_one_rich_text_editor(window):
 
 
 def test_the_batch_queue_is_gone(window):
-    """No list, no buttons: the file queue and its three buttons are history."""
+    """No list, no buttons of the window's own: the file queue and its three
+    buttons are history.  The only buttons in the window belong to the panel the
+    text is searched from, which is what they are there for."""
     assert window.findChildren(QListWidget) == []
-    assert window.findChildren(QPushButton) == []
+    stray = [
+        button for button in window.findChildren(QPushButton)
+        if not window.find_panel.isAncestorOf(button)
+    ]
+    assert stray == []
 
 
 def test_the_text_is_shown_in_a_fixed_width_font(window):
@@ -615,8 +622,15 @@ def test_the_numbers_follow_an_edit_and_one_press_of_undo(shown, qapp):
 # the menu bar
 # ---------------------------------------------------------------------------
 def plain(text: str) -> str:
-    """A menu label with the Alt key taken back out of it."""
-    return text.replace("&", "")
+    """A menu label as it is printed on screen.
+
+    An ampersand before a letter marks the Alt key and is not printed; a pair of
+    them prints one ampersand, which is how *Find & Replace* has to be written as
+    ``Find && &Replace``.  The two kinds come out in the right order.
+    """
+    wanted = "\x00"
+    kept = text.replace("&&", wanted)
+    return kept.replace("&", "").replace(wanted, "&")
 
 
 def menu_of(window, name: str):
@@ -654,6 +668,33 @@ def keys(window, menu_name: str, label: str) -> str:
     return item(window, menu_name, label).shortcut().toString()
 
 
+def press(window, label: str) -> None:
+    """One of the search panel's buttons, found by what it says, pressed."""
+    for button in window.find_panel.findChildren(QPushButton):
+        if button.text() == label:
+            button.click()
+            return
+    raise AssertionError(f"the panel has no {label!r} button")
+
+
+def press_key(qapp, window, widget, shortcut: str) -> None:
+    """A key press sent to a widget, with the window on screen to answer it.
+
+    The keys a menu promises are answered by whatever holds the keyboard, and a
+    widget that has never been on screen never holds it.  The rest of these tests
+    keep their windows off screen, so this one puts a window up long enough to
+    press a key on it.
+    """
+    combo = QKeySequence(shortcut)[0]
+    window.show()
+    window.activateWindow()
+    widget.setFocus(Qt.FocusReason.OtherFocusReason)
+    qapp.processEvents()
+    key_press = QKeyEvent(QEvent.Type.KeyPress, combo.key(), combo.keyboardModifiers())
+    QApplication.sendEvent(widget, key_press)
+    qapp.processEvents()
+
+
 def test_the_menu_bar_offers_file_edit_tweaks_and_help(window):
     assert [plain(action.text()) for action in window.menuBar().actions()] == [
         "File", "Edit", "Tweaks", "Help"
@@ -688,7 +729,8 @@ def test_the_file_menu_carries_the_shortcuts_people_already_know(window):
 
 def test_the_edit_menu_is_the_usual_set_of_edits(window):
     assert labels(menu_of(window, "Edit")) == [
-        "Undo", "Redo", "-", "Cut", "Copy", "Paste", "Select All",
+        "Undo", "Redo", "-", "Cut", "Copy", "Paste", "Select All", "-",
+        "Find & Replace", "Find next",
     ]
     assert [keys(window, "Edit", name) for name in
             ("Undo", "Redo", "Cut", "Copy", "Paste", "Select All")] == [
@@ -730,6 +772,268 @@ def test_an_edit_with_nothing_to_work_on_is_greyed_out(window, clipboard):
     assert not item(window, "Edit", "Redo").isEnabled()
     click(window, "Edit", "Undo")
     assert item(window, "Edit", "Redo").isEnabled()
+
+
+# ---------------------------------------------------------------------------
+# find and replace: the panel under the editor
+# ---------------------------------------------------------------------------
+#: three lines, with the text being searched for standing on the first and third
+SEEKING = 'name "kuid"\nkind "interior"\nusername "kuid"\n'
+
+
+def test_the_search_panel_is_under_the_editor_and_put_away_to_begin_with(window):
+    assert window.find_panel.isHidden()
+    assert window.dockWidgetArea(window.find_panel) == Qt.DockWidgetArea.BottomDockWidgetArea
+    # it belongs at the bottom and is not going anywhere else
+    assert window.find_panel.allowedAreas() == Qt.DockWidgetArea.BottomDockWidgetArea
+    # the text still has the whole middle of the window to itself
+    assert window.centralWidget() is window.editor
+
+
+def test_the_panel_has_no_title_bar_because_it_has_a_close_button(window):
+    """A strip at the bottom of the window, not a little window of its own that
+    can be dragged away, floated or closed from its own corner."""
+    assert window.find_panel.titleBarWidget() is not None
+    assert window.find_panel.features() == QDockWidget.DockWidgetFeature.NoDockWidgetFeatures
+
+
+def test_the_panel_is_up_under_the_text_when_the_window_is_up(qapp, window):
+    window.show()
+    qapp.processEvents()
+    window.find_panel.open()
+    qapp.processEvents()
+    strip, text = window.find_panel.geometry(), window.editor.geometry()
+    assert strip.width() > 0 and strip.height() > 0
+    assert strip.top() >= text.bottom()
+
+
+def test_the_panel_holds_two_boxes_a_checkbox_and_four_buttons(window):
+    panel = window.find_panel
+    assert panel.find_field.placeholderText()
+    assert panel.replace_field.placeholderText()
+    assert panel.match_case.text() == "Match case"
+    assert {one.text() for one in panel.findChildren(QPushButton)} == {
+        "Find next (F3)", "Replace", "Replace all", "Close",
+    }
+
+
+def test_the_search_is_asked_for_from_the_edit_menu(window):
+    assert keys(window, "Edit", "Find & Replace") == "Ctrl+F"
+    assert keys(window, "Edit", "Find next") == "F3"
+
+    # repeating a search is worth having only while the panel is up
+    assert not item(window, "Edit", "Find next").isEnabled()
+    click(window, "Edit", "Find & Replace")
+    assert not window.find_panel.isHidden()
+    assert item(window, "Edit", "Find next").isEnabled()
+
+    press(window, "Close")
+    assert window.find_panel.isHidden()
+    assert not item(window, "Edit", "Find next").isEnabled()
+
+
+def test_ctrl_F_brings_the_panel_up_and_escape_puts_it_away(qapp, window):
+    """The two keys the panel answers, taken from wherever the keyboard is."""
+    window.editor.setPlainText(SEEKING)
+    press_key(qapp, window, window.editor, "Ctrl+F")
+    assert not window.find_panel.isHidden()
+    assert window.editor.toPlainText() == SEEKING  # the key is not typed into the text
+
+    press_key(qapp, window, window.find_panel.find_field, "Esc")
+    assert window.find_panel.isHidden()
+    assert window.editor.toPlainText() == SEEKING
+
+
+def test_the_keyboard_stays_in_the_find_box_while_the_search_is_pressed(qapp, window):
+    """Pressing F3 with the keyboard in the box searches the text rather than
+    writing anything into the box."""
+    window.editor.setPlainText(SEEKING)
+    press_key(qapp, window, window.editor, "Ctrl+F")
+    window.find_panel.find_field.setText("kuid")
+    press_key(qapp, window, window.find_panel.find_field, "F3")
+    assert window._message == "Found on line 1"
+    assert window.find_panel.find_field.text() == "kuid"
+    assert window.find_panel.find_field.hasFocus()
+
+
+def test_the_panel_offers_what_is_selected_as_the_text_to_look_for(window):
+    """Selecting a word and asking for the rest of them is how a search starts."""
+    window.editor.setPlainText('kind "interior"\nkind "exterior"')
+    caret = window.editor.textCursor()
+    caret.setPosition(6)
+    caret.setPosition(14, QTextCursor.MoveMode.KeepAnchor)
+    window.editor.setTextCursor(caret)
+    click(window, "Edit", "Find & Replace")
+    assert window.find_panel.find_field.text() == "interior"
+
+
+def test_a_selection_over_more_than_one_line_is_not_offered(window):
+    """Half a file in the Find box is a mistake rather than a search."""
+    window.editor.setPlainText('kind "interior"\nkind "exterior"')
+    window.find_panel.find_field.setText("interior")
+    window.editor.selectAll()
+    click(window, "Edit", "Find & Replace")
+    assert window.find_panel.find_field.text() == "interior"
+
+
+def test_finding_selects_the_text_and_says_which_line_it_stands_on(window):
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+
+    press(window, "Find next (F3)")
+    assert window.editor.textCursor().selectedText() == "kuid"
+    assert window._message == "Found on line 1"
+
+    press(window, "Find next (F3)")
+    assert window.editor.textCursor().selectedText() == "kuid"
+    assert window._message == "Found on line 3"
+
+
+def test_the_search_goes_on_from_the_top_once_it_reaches_the_end_of_the_file(window):
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    press(window, "Find next (F3)")
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 3"
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 1, from the top of the file again"
+
+
+def test_a_text_that_is_nowhere_in_the_file_is_said_so(window):
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("mesh-table")
+    press(window, "Find next (F3)")
+    assert window._message == "Nothing in the file says mesh-table"
+    assert window.editor.textCursor().selectedText() == ""
+    press(window, "Replace all")
+    assert window._message == "Nothing in the file says mesh-table"
+    assert window.editor.toPlainText() == SEEKING
+
+
+def test_an_empty_find_box_is_nobody_asking_for_anything(window):
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    for button in ("Find next (F3)", "Replace", "Replace all"):
+        press(window, button)
+        assert window._message == "Nothing to look for"
+    assert window.editor.toPlainText() == SEEKING
+
+
+def test_the_letters_match_only_themselves_once_the_box_is_ticked(window):
+    window.editor.setPlainText('name "KUID"\nkind "interior"')
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+
+    window.find_panel.match_case.setChecked(True)
+    press(window, "Find next (F3)")
+    assert window._message == "Nothing in the file says kuid"
+
+    window.find_panel.match_case.setChecked(False)
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 1"
+
+
+def test_replacing_writes_over_the_match_and_moves_on_to_the_next_one(window):
+    window.editor.setPlainText(SEEKING)
+    before = window.editor.toPlainText()
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    window.find_panel.replace_field.setText("id")
+    press(window, "Find next (F3)")
+    press(window, "Replace")
+    assert window.editor.toPlainText() == 'name "id"\nkind "interior"\nusername "kuid"\n'
+    assert window._message == "Replaced on line 1, next on line 3"
+
+    window.editor.undo()
+    assert window.editor.toPlainText() == before
+
+
+def test_replacing_without_a_match_under_the_caret_finds_one_instead(window):
+    """The button is safe to press without looking first: text nobody selected is
+    never written over."""
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    window.find_panel.replace_field.setText("id")
+    press(window, "Replace")
+    assert window.editor.toPlainText() == SEEKING
+    assert window._message == "Found on line 1"
+    assert window.editor.textCursor().selectedText() == "kuid"
+
+
+def test_replacing_the_lot_is_one_change_that_one_press_of_undo_takes_back(window):
+    window.editor.setPlainText(SEEKING)
+    before = window.editor.toPlainText()
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    window.find_panel.replace_field.setText("id")
+    press(window, "Replace all")
+    assert window._message == "Replaced 2 places"
+    assert window.editor.toPlainText() == 'name "id"\nkind "interior"\nusername "id"\n'
+
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == before
+
+
+def test_replacing_one_place_is_said_as_one_place(window):
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("interior")
+    window.find_panel.replace_field.setText("external")
+    press(window, "Replace all")
+    assert window._message == "Replaced 1 place"
+
+
+def test_replacing_the_lot_follows_the_case_box_as_well(window):
+    window.editor.setPlainText('name "KUID"\nname "kuid"')
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    window.find_panel.replace_field.setText("id")
+    window.find_panel.match_case.setChecked(True)
+    press(window, "Replace all")
+    assert window._message == "Replaced 1 place"
+    assert window.editor.toPlainText() == 'name "KUID"\nname "id"'
+
+
+def test_a_replacement_holding_the_text_it_replaces_changes_each_place_once(window):
+    """``kuid`` into ``kuid_table`` is a normal thing to ask for, and the text
+    that has just been written must not be searched over again."""
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    window.find_panel.replace_field.setText("kuid_table")
+    press(window, "Replace all")
+    assert window._message == "Replaced 2 places"
+    assert window.editor.toPlainText() == (
+        'name "kuid_table"\nkind "interior"\nusername "kuid_table"\n'
+    )
+
+
+def test_looking_through_the_file_changes_nothing_about_it(window):
+    window.editor.setPlainText(SEEKING)
+    window.editor.document().setModified(False)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    press(window, "Find next (F3)")
+    press(window, "Find next (F3)")
+    assert not window.editor.document().isModified()
+
+
+def test_a_match_far_down_a_long_file_is_brought_into_sight(qapp, window):
+    """Pressing the key again is no use if the place it found is off the bottom
+    of the window."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText("\n".join(f'line {number}' for number in range(1, 401))
+                               + "\nkuid \"found me\"")
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("found me")
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 401"
+    assert 401 in [number for number, _, _ in window.editor.visible_lines()]
 
 
 def test_the_about_box_names_the_program_the_address_and_the_version(window, dialogs):

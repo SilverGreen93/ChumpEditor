@@ -26,7 +26,7 @@ def build_menus(window: QMainWindow) -> None:
     """Put File, Edit, Tweaks and Help on the window, wired to its methods."""
     bar = window.menuBar()
     _file(bar.addMenu("&File"), window)
-    _edit(bar.addMenu("&Edit"), window.editor)
+    _edit(bar.addMenu("&Edit"), window)
     _tweaks(bar.addMenu("&Tweaks"), window)
     _help(bar.addMenu("&Help"), window)
 
@@ -67,8 +67,11 @@ def _recent(menu, window: QMainWindow) -> None:
     window.fill_recent_menu()
 
 
-def _edit(menu, editor):
-    """The usual work on the text, which the text area does for us."""
+def _edit(menu, window: QMainWindow) -> None:
+    """The usual work on the text, which the text area does for us, and the
+    search that looks through it from a panel at the bottom of the window."""
+    editor = window.editor
+    panel = window.find_panel
     document = editor.document()
 
     undo = _add(menu, "&Undo", QKeySequence.StandardKey.Undo, editor.undo)
@@ -79,12 +82,20 @@ def _edit(menu, editor):
     paste = _add(menu, "&Paste", QKeySequence.StandardKey.Paste, editor.paste)
     _add(menu, "Select &All", QKeySequence.StandardKey.SelectAll, editor.selectAll)
 
-    # an action that has nothing to work on is greyed out rather than beeping
-    for action in (undo, redo, cut, copy):
+    menu.addSeparator()
+    # the ampersand that is part of the name has to be written twice, so the one
+    # that marks the Alt key can sit on the R of Replace
+    _add(menu, "Find && &Replace", QKeySequence("Ctrl+F"), panel.open)
+    find_next = _add(menu, "Find &next", QKeySequence("F3"), panel.find_next)
+
+    # an action that has nothing to work on is greyed out rather than beeping,
+    # and repeating a search is one of them while the panel is put away
+    for action in (undo, redo, cut, copy, find_next):
         action.setEnabled(False)
     document.undoAvailable.connect(undo.setEnabled)
     document.redoAvailable.connect(redo.setEnabled)
     editor.copyAvailable.connect(_keep_both(cut, copy))
+    panel.showing.connect(find_next.setEnabled)
 
     paste.setEnabled(editor.canPaste())
     _clipboard().dataChanged.connect(lambda: paste.setEnabled(editor.canPaste()))

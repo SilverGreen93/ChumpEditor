@@ -10,6 +10,7 @@ Features:
 - Can be used directly as an editor for config.txt/config.chump files
 - Contains tweaks to modernize obsolete config files (see below)
 - Offers syntax highlighting and line numbers
+- Finds and replaces text in a panel along the bottom of the window (Ctrl+F)
 
 ![screenshot](assets/screenshot.png)
 
@@ -103,7 +104,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Recent
   files (the ten opened last, and Clear list), Save chump (Ctrl+S), Save chump
   as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
-- **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
+- **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
+  Find next (F3).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also sets every container off from the tags
@@ -167,6 +169,38 @@ own, kept with the themes:
 So it is the same list the next time the program starts, and a list you can read
 or delete by hand. Writing it is never part of opening a file: should the list
 refuse to be written, the file still opens and the status bar says so.
+
+### Find and replace
+
+**Edit > Find & Replace** (Ctrl+F) brings up a panel along the bottom of the
+window, under the text: a Find box, a Replace box, a **Match case** checkbox, and
+**Find next (F3)**, **Replace**, **Replace all** and **Close** buttons. It is a
+strip of the window rather than a window of its own, so nothing about the text
+area - the numbers down the side, the colours, the undo history - is disturbed,
+and **Close** or Escape puts it away again. Whatever was selected before opening
+it goes into the Find box, and what was last asked for stays there, so the same
+search can be run again after a change.
+
+- **Find next** (F3, or Enter in the Find box) selects the next place the text
+  stands, past the one the caret is on, and the status bar names the line. Past
+  the end of the file it starts again from the top and says so, so pressing the
+  key over and over walks right round the file.
+- **Replace** (or Enter in the Replace box) writes over the match the selection
+  is on and moves to the next one. With nothing selected, or with a selection
+  that is not the text being sought, nothing is written and the next match is
+  found instead.
+- **Replace all** does every place in the file at once, and the status bar says
+  how many there were.
+
+One press of Undo takes back one Replace, or a whole Replace all, which is one
+change however many places it touched. No place is matched twice, so a
+replacement that holds the very text it replaces (`kuid` into `kuid_table`) does
+not turn into a search that never ends. An empty Find box asks for nothing: the
+status bar says *Nothing to look for* rather than finding a match between every
+two characters.
+
+What is sought is plain text, not a pattern, so brackets, dots and backslashes
+are looked for as the characters they are.
 
 ### Syntax check
 
@@ -460,15 +494,16 @@ src/chumpeditor/document.py    opening, saving, exporting: the rules the editor 
 src/chumpeditor/theme.py       the colour themes: the JSON format, reading and writing one
 src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
 src/chumpeditor/tweaks.py      the four tidy-ups of the way older files read: Tweaks does this
+src/chumpeditor/search.py      where a piece of text stands in another, and what replaces it
 src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/recent.py      the ten files opened last: recent.json in that folder
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
 src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, about.py,
-                               highlighter.py, drops.py, resources.py
+                               highlighter.py, drops.py, find.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         563 tests
+tests/                         608 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

@@ -9,6 +9,10 @@ changed since it was written.
 Writing the file back is the window's decision, not the editor's: *Save chump*
 packs the text into a binary file and *Export txt* writes the text form, and
 whichever was last written becomes the file the window is talking about.
+
+Searching the text belongs to a panel of its own, stood at the bottom of the
+window and brought up from the Edit menu; the window only connects its news to
+the status line.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
 
 from .. import tweaks
@@ -38,6 +43,7 @@ from ..recent import RecentFiles
 from .about import ABOUT_TITLE, about_html
 from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
+from .find import FindReplacePanel
 from .menus import build_menus
 from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, window_icon
 
@@ -107,6 +113,13 @@ class ChumpWindow(QMainWindow):
 
         self.editor = RichTextEditor(self)
         self.setCentralWidget(self.editor)
+
+        # the search panel shares the window rather than the text area: it is
+        # docked underneath the editor, so the editor and its line numbers are
+        # left exactly as they are, and it is out of sight until asked for
+        self.find_panel = FindReplacePanel(self.editor)
+        self.find_panel.reported.connect(self.say)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.find_panel)
 
         self.setWindowTitle(APP_TITLE)
         icon = window_icon()
