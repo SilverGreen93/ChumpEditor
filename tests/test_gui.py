@@ -1053,6 +1053,7 @@ TIDY = "".join(
         lined("kuid", "<kuid:2:100>"),
         lined("username", '"a name"'),
         lined("kind", '"interior"'),
+        "",
         "mesh-table",
         "{",
         lined("  mesh", '"a.im"'),
@@ -1080,16 +1081,17 @@ def test_reordering_names_the_tags_that_moved(window, dialogs):
 
     kind, title, text = dialogs[-1]
     assert (kind, title) == ("info", "Reorder tags")
-    assert "Reordered 4 tags, added 1 blank line" in text
+    assert "Reordered 4 tags, added 2 blank lines" in text
     for line in (
         "kuid moved from line 2 to line 1",
         "username moved from line 7 to line 2",
         "kind moved from line 1 to line 3",
-        "mesh-table moved from line 3 to line 4",
-        "a blank line went under the mesh-table on line 7",
+        "mesh-table moved from line 3 to line 5",
+        "a blank line went above the mesh-table on line 5",
+        "a blank line went under the mesh-table on line 8",
     ):
         assert line in text
-    assert window._message == "Reordered 4 tags, added 1 blank line"
+    assert window._message == "Reordered 4 tags, added 2 blank lines"
 
 
 def test_one_press_of_undo_takes_the_whole_reorder_back(window, dialogs):
@@ -1137,7 +1139,7 @@ def test_a_file_whose_tags_cannot_be_cut_out_is_warned_about(window, dialogs):
     assert window._message == "The tags cannot be reordered"
 
 
-def test_the_containers_are_opened_out_even_when_the_order_is_already_right(
+def test_the_containers_are_set_off_even_when_the_order_is_already_right(
     window, dialogs
 ):
     """Nothing moves, and the blank lines still go in, as one edit Undo takes back."""
@@ -1155,12 +1157,28 @@ def test_the_containers_are_opened_out_even_when_the_order_is_already_right(
             "}",
         )
     )
+    set_off = "".join(
+        line + "\n"
+        for line in (
+            lined("kuid", "<kuid:2:100>"),
+            lined("kind", '"interior"'),
+            "",
+            "mesh-table",
+            "{",
+            lined("  mesh", '"a.im"'),
+            "}",
+            "",
+            "kuid-table",
+            "{",
+            "}",
+        )
+    )
     window.editor.setPlainText(closed)
     click(window, "Tweaks", "Reorder tags")
 
-    assert window.editor.toPlainText() == closed.replace("}\nkuid-table", "}\n\nkuid-table")
-    assert dialogs[-1][2].startswith("Added 1 blank line")
-    assert window._message == "Added 1 blank line"
+    assert window.editor.toPlainText() == set_off
+    assert dialogs[-1][2].startswith("Added 2 blank lines")
+    assert window._message == "Added 2 blank lines"
 
     click(window, "Edit", "Undo")
     assert window.editor.toPlainText() == closed
@@ -1176,7 +1194,7 @@ def test_a_real_config_file_is_reordered_in_the_window(window, dialogs, tmp_path
 
     after = window.editor.toPlainText()
     assert dialogs[-1][2].startswith("Reordered ")
-    # the containers come out with a blank line under them, so the file is longer
+    # every container comes out set off from the tags around it, so the file is longer
     assert "}\n\n" in after
     assert len(after.split("\n")) > len(before.split("\n"))
 

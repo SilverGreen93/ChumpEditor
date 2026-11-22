@@ -78,11 +78,14 @@ in::
 A container travels whole, with its subtags exactly as they stood, and nothing
 inside one is moved out of it.  The blank lines under a tag travel with it so the
 gaps keep their shape, and the blank lines at the end of the file stay at the end.
-On top of that, one blank line goes under every container - however deep inside
-the file it is - wherever a tag follows its closing brace, since that gap is what
-shows where a container ends.  None goes in above another closing brace, which
-would drive a wedge between a tag and the container it is written inside, and none
-at the end of the file, where there is nothing to separate.  A tag whose value or
+On top of that, every container is set off from the tags around it with a blank
+line - one under its closing brace wherever a tag follows it, and one above the
+line naming it wherever a tag stands there - however deep inside the file the
+container is, since that gap is what shows where a container ends and a tag
+begins.  None goes in beside a brace: above another closing brace would drive a
+wedge between a tag and the container it is written inside, and below an opening
+one would part a container from the brace it opens; and none at the start or the
+end of the file, where there is nothing to separate.  A tag whose value or
 container is never closed, and a line at the top that is not a tag at all, mean
 the tags cannot be told apart from each other, and then nothing at all is moved
 and the person is warned.
@@ -974,19 +977,24 @@ class Move:
 
 @dataclass(frozen=True)
 class Gap:
-    """One container that had no blank line under it, and the line it got one.
+    """One container that had no blank line beside it, and the line it got one.
 
-    ``line`` is counted in the text as it stands afterwards, which is the text
-    the person is looking at when the window says this.
+    ``line`` is the container's own line - its closing brace when the blank line
+    went under the container and its name when the blank line went above it -
+    counted in the text as it stands afterwards, which is the text the person is
+    looking at when the window says this.
     """
 
     #: the tag whose container it is, spelled as the file spells it
     tag: str
-    #: the line the container's closing brace stands on, counted from 1
+    #: the line the closing brace, or the name, stands on, counted from 1
     line: int
+    #: whether the blank line went above the container rather than under it
+    above: bool = False
 
     def __str__(self) -> str:
-        return f"a blank line went under the {self.tag} on line {self.line}"
+        side = "above" if self.above else "under"
+        return f"a blank line went {side} the {self.tag} on line {self.line}"
 
 
 @dataclass(frozen=True)
@@ -999,15 +1007,15 @@ class Order:
     all, and is empty when they could be.
     """
 
-    #: the whole text, with the tags in their new places and the containers
-    #: opened out
+    #: the whole text, with the tags in their new places and every container set
+    #: off from the tags around it
     text: str
     #: the edits that did it: one to move the tags, one for each blank line that
     #: came in where nothing moved, and empty when nothing needed doing
     rewrites: tuple[Rewrite, ...] = ()
     #: the tags that changed place, in the order they stand in the text now
     moves: tuple[Move, ...] = ()
-    #: the containers that got a blank line under them, in the order the lines
+    #: the containers that got a blank line beside them, in the order the lines
     #: stand in the text now
     gaps: tuple[Gap, ...] = ()
     #: why the file was left alone altogether, or '' when it was not
@@ -1046,8 +1054,8 @@ class Order:
             return (
                 "Nothing was reordered.  kuid and username come first, then the "
                 "tags that hold one value, then the containers, and kuid-table "
-                "and obsolete-table after all of them, every container with a "
-                "blank line under it."
+                "and obsolete-table after all of them, and every container is "
+                "set off from the tags around it."
             )
         listed = "\n".join(f"  {item}" for item in (*self.moves, *self.gaps))
         return f"{self.status}:\n\n{listed}"
@@ -1062,11 +1070,12 @@ def reorder_tags(text: str) -> Order:
     container travels whole with its subtags as they are, and nothing inside one
     is moved out of it.
 
-    On top of the order, a blank line goes under every container, however deep
-    inside the file it is, wherever a tag follows the closing brace - the rule is
-    ``_the_blank_lines_to_open``.  The gaps are looked for in the text as it will
-    stand once the tags have moved, since a container that moved has something
-    else under it.
+    On top of the order, every container is set off from the tags around it with a
+    blank line, however deep inside the file it is: one under its closing brace
+    and one above the line naming it, each only where a tag stands there rather
+    than a brace.  The rule is ``_the_blank_lines_to_open``.  The gaps are looked
+    for in the text as it will stand once the tags have moved, since a container
+    that moved has something else beside it.
 
     Only the stretch between the first tag out of place and the last one is
     rewritten, plus one short edit for each blank line that has to come in where
@@ -1100,10 +1109,10 @@ def reorder_tags(text: str) -> Order:
         settled[low : high + 1] = [lines[number] for number in moved]
         origin[low : high + 1] = moved
 
-    # the containers with a tag but no blank line under them, told as the line
-    # their brace closes on, in the moved text, and the tag that opened them
+    # the containers with no blank line beside them, told as the line the blank
+    # line goes under in the moved text, and the tag whose container it is
     want = _the_blank_lines_to_open(settled)
-    under = [place for place, _ in want]
+    under = [one.after for one in want]
     opening = set(under)
 
     # every line once those blank lines are in as well, so the text the rewrites
@@ -1148,11 +1157,11 @@ def reorder_tags(text: str) -> Order:
             },
         )
 
-    for place, tag in want:
-        if not low <= place <= high:
+    for one in want:
+        if not low <= one.after <= high:
             # the blank line is put in after the line, leaving the line itself
             # and everything on either side of it exactly as it was
-            at = _end_of(lines, eol, place)
+            at = _end_of(lines, eol, one.after)
             rewrites.append(Rewrite(start=at, end=at, text=eol))
 
     return Order(
@@ -1160,8 +1169,12 @@ def reorder_tags(text: str) -> Order:
         rewrites=tuple(rewrites),
         moves=moves,
         gaps=tuple(
-            Gap(tag=tag, line=_the_line_the_gaps_land_on(place, under) + 1)
-            for place, tag in want
+            Gap(
+                tag=one.tag,
+                line=_the_line_the_gaps_land_on(one.about, under) + 1,
+                above=one.above,
+            )
+            for one in want
         ),
     )
 
@@ -1344,26 +1357,57 @@ class _Tag:
     brace: int
 
 
-def _the_blank_lines_to_open(lines: list[str]) -> tuple[tuple[int, str], ...]:
-    """Where a blank line has to come in, and under which container's brace.
+@dataclass(frozen=True)
+class _Opening:
+    """One blank line that has to come in, and the container that wants it.
 
-    Every container is looked at, however deep inside the file it is, since the
-    gap between a container and the tag under it is what shows where the one ends
-    and the other begins.  Nothing goes in above another closing brace, which
-    would part a tag from the container it is written inside, and nothing at the
-    end of the file, which has no tag under it to separate.  A blank line already
-    there is left alone, since a second one would say the same thing twice.
+    ``after`` is the line the blank line goes under in the text as it stands
+    before any of them come in, which is where the edit is cut.  ``about`` is the
+    line the container is named on - its closing brace when the blank line goes
+    under it and its name when the blank line goes above it - so what is said
+    afterwards quotes a line the person can find in the text they are looking at.
     """
-    wanted: list[tuple[int, str]] = []
-    for at, tag in _the_containers_that_close(lines):
-        below = lines[at + 1].strip() if at + 1 < len(lines) else ""
-        if below and not below.startswith("}"):
-            wanted.append((at, tag))
-    return tuple(wanted)
+
+    after: int
+    about: int
+    tag: str
+    above: bool
 
 
-def _the_containers_that_close(lines: list[str]) -> tuple[tuple[int, str], ...]:
-    """Every container in the text, as the line its brace closes on and its name.
+def _the_blank_lines_to_open(lines: list[str]) -> tuple[_Opening, ...]:
+    """Where a blank line has to come in, and which container asked for it.
+
+    A container is set off from the tags around it on both sides: a blank line
+    goes under its closing brace, wherever a tag follows that, and above the
+    line naming it, wherever a tag stands on that.  Neither goes in next to a
+    brace - nothing above another closing brace, which would part a tag from the
+    container it is written inside, and nothing below an opening one, which
+    would separate a container from the brace it opens - and none at the start
+    or the end of the file, where there is no tag to separate.  A blank line
+    already there is left alone, since a second one would say the same thing
+    twice, which also means one gap between two containers serves them both.
+    """
+    wanted: dict[int, _Opening] = {}
+    for container in _the_containers_in(lines):
+        below = container.last
+        follower = lines[below + 1].strip() if below + 1 < len(lines) else ""
+        if follower and not follower.startswith("}"):
+            wanted.setdefault(
+                below,
+                _Opening(after=below, about=below, tag=container.tag, above=False),
+            )
+        above = container.first - 1
+        over = lines[above].strip() if above >= 0 else ""
+        if over and not over.endswith("{"):
+            wanted.setdefault(
+                above,
+                _Opening(after=above, about=above + 1, tag=container.tag, above=True),
+            )
+    return tuple(wanted[place] for place in sorted(wanted))
+
+
+def _the_containers_in(lines: list[str]) -> tuple[_Tag, ...]:
+    """Every container in the text, in the order their names are written.
 
     The containers inside other containers are read the same way as the ones at
     the top, each stretch between a pair of braces on its own, and what comes back
@@ -1371,7 +1415,7 @@ def _the_containers_that_close(lines: list[str]) -> tuple[tuple[int, str], ...]:
     rather than guessed at, which only ever happens below a container the caller
     has already read without complaint.
     """
-    found: list[tuple[int, str]] = []
+    found: list[_Tag] = []
     todo: list[tuple[int, int]] = [(0, len(lines))]
     while todo:
         start, end = todo.pop()
@@ -1380,9 +1424,9 @@ def _the_containers_that_close(lines: list[str]) -> tuple[tuple[int, str], ...]:
             continue
         for tag in tags:
             if tag.brace >= 0:
-                found.append((tag.last, tag.tag))
+                found.append(tag)
                 todo.append((tag.brace + 1, tag.last))
-    found.sort()
+    found.sort(key=lambda container: container.first)
     return tuple(found)
 
 
