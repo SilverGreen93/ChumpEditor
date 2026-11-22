@@ -36,9 +36,9 @@ def test_the_list_is_kept_in_the_programs_own_folder(tmp_path, monkeypatch):
 
 
 def test_that_folder_is_the_programs_name_under_the_users_own_one(tmp_path, monkeypatch):
-    """``%LOCALAPPDATA%\\ChumpEditor`` on Windows, ``~/.config/ChumpEditor``
+    """``%APPDATA%\\ChumpEditor`` on Windows, ``~/.config/ChumpEditor``
     elsewhere, which is where the themes are looked for as well."""
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setattr(sys, "platform", "win32")
     assert config_dir() == tmp_path / APP_NAME
 

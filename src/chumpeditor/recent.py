@@ -7,7 +7,7 @@ again, the file menu lists the last few, newest first.
 Free of Qt like :mod:`chumpeditor.document`, so the list can be read, tested
 and written without a window.  It lives as one small JSON file in the folder
 the program keeps its own settings in, next to the themes:
-``%LOCALAPPDATA%\\ChumpEditor\\recent.json`` on Windows,
+``%APPDATA%\\ChumpEditor\\recent.json`` on Windows,
 ``~/.config/ChumpEditor/recent.json`` elsewhere.
 """
 

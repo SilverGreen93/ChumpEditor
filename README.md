@@ -160,7 +160,7 @@ that would not open is not listed. The list is one small file of the program's
 own, kept with the themes:
 
 ```
-%LOCALAPPDATA%\ChumpEditor\recent.json    (Windows)
+%APPDATA%\ChumpEditor\recent.json    (Windows)
 ~/.config/ChumpEditor/recent.json         (elsewhere)
 ```
 
@@ -445,7 +445,7 @@ To use your own copy rather than editing the program's files, put a
 `trainz.json` here:
 
 ```
-%LOCALAPPDATA%\ChumpEditor\themes\    (Windows)
+%APPDATA%\ChumpEditor\themes\    (Windows)
 ~/.config/ChumpEditor/themes/         (elsewhere)
 ```
 

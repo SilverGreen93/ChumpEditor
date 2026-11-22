@@ -24,15 +24,15 @@ APP_NAME = "ChumpEditor"
 def config_dir() -> Path:
     """The directory this program's own settings and themes live in.
 
-    Where each system expects them: ``%LOCALAPPDATA%\\ChumpEditor`` on Windows,
+    Where each system expects them: ``%APPDATA%\\ChumpEditor`` on Windows,
     ``~/.config/ChumpEditor`` elsewhere.  Nothing is created here, since most
     of the time the answer is only used to look something up, and a program
     that leaves an empty directory behind after being run once has done
     something rude.
     """
     if sys.platform.startswith("win"):
-        base = os.environ.get("LOCALAPPDATA")
-        home = Path(base) if base else Path.home() / "AppData" / "Local"
+        base = os.environ.get("APPDATA")
+        home = Path(base) if base else Path.home() / "AppData" / "Roaming"
     else:
         base = os.environ.get("XDG_CONFIG_HOME")
         home = Path(base) if base else Path.home() / ".config"

@@ -33,7 +33,7 @@ __all__ = [
 HOME_URL = "https://github.com/SilverGreen93/ChumpEditor"
 
 #: The name people read, and the name the machine uses.  Everything that is a
-#: file, a folder or a key - the exe, %LOCALAPPDATA%\ChumpEditor, the package
+#: file, a folder or a key - the exe, %APPDATA%\ChumpEditor, the package
 #: name, the desktop entry - is spelled ``ChumpEditor`` without a space, since
 #: that is what has to be typed; everything that is only ever read out loud is
 #: spelled ``Chump Editor``.  ``tests/test_gui.py`` keeps the two in step.
