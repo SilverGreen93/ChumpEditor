@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from chumpeditor import tweaks
-from chumpeditor.chump import parse_text, read_text_file
+from chumpeditor.chump import load_chump, parse_text, read_text_file, render_text
 
 SAMPLES = Path(__file__).parent / "test_files"
 
@@ -88,6 +88,32 @@ def out_of_order(tag) -> list[str]:
         elif deeper:
             left.append(child.name)
         left.extend(out_of_order(child))
+    return left
+
+
+def the_gaps_left(text: str) -> list[int]:
+    """The lines of this text where a container stands without a gap beside it.
+
+    A container is set off on both sides: a blank line above the line naming it,
+    unless a ``{`` or the start of the container it is written in stands there,
+    and a blank line under the ``}`` closing it, unless another ``}`` or the end
+    of the file stands there.  The lines are read exactly as they stand, with
+    nothing moved, which is how the same rule is asked of text that never goes
+    through a reorder at all.
+    """
+    lines = text.split("\r\n") if "\r\n" in text else text.split("\n")
+    left: list[int] = []
+    for at, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped == "}":
+            under = lines[at + 1].strip() if at + 1 < len(lines) else ""
+            if under and not under.startswith("}"):
+                left.append(at + 1)
+        if stripped.endswith("{"):
+            named = at if stripped != "{" else at - 1
+            above = lines[named - 1].strip() if named >= 1 else ""
+            if above and not above.endswith("{"):
+                left.append(named + 1)
     return left
 
 
@@ -1670,20 +1696,40 @@ def test_reordering_loses_no_tag_and_needs_no_second_press():
 def test_a_real_asset_ends_up_set_off_on_both_sides_of_every_container():
     for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
         text = read_text_file(SAMPLES / name)
-        lines = tweaks.reorder_tags(text).text.split("\r\n")
+        left = the_gaps_left(tweaks.reorder_tags(text).text)
 
-        left_over = []
-        for at, line in enumerate(lines):
-            if line.strip() == "}":
-                under = lines[at + 1].strip() if at + 1 < len(lines) else ""
-                if under and not under.startswith("}"):
-                    left_over.append(at + 1)
-            if line.strip().endswith("{"):
-                named = at if line.strip() != "{" else at - 1
-                above = lines[named - 1].strip() if named >= 1 else ""
-                if above and not above.endswith("{"):
-                    left_over.append(named + 1)
-        assert not left_over, f"{name}: line {left_over}"
+        assert not left, f"{name}: line {left}"
+
+
+def test_the_real_config_files_are_already_set_off_wherever_a_container_stands():
+    # the text files come out of the decoder, which lays a file out this way
+    # before anybody touches it, so the reorder is never asked for a gap
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        left = the_gaps_left(read_text_file(SAMPLES / name))
+
+        assert not left, f"{name}: line {left}"
+
+
+def test_a_decoded_file_sets_its_containers_off_at_every_depth():
+    for name in ("config1.chump", "config2.chump", "config3.chump", "semnal.chump"):
+        text = render_text(load_chump(SAMPLES / name))
+        left = the_gaps_left(text)
+
+        assert not left, f"{name}: line {left}"
+
+
+def test_a_decoded_file_needs_no_blank_line_and_no_second_press():
+    for name in ("config1.chump", "semnal.chump"):
+        text = render_text(load_chump(SAMPLES / name))
+        once = tweaks.reorder_tags(text)
+        twice = tweaks.reorder_tags(once.text)
+
+        assert not once.warning, name
+        assert not once.gaps, name
+        assert held(parse_text(once.text)) == held(parse_text(text)), name
+        assert not the_gaps_left(once.text), name
+        assert twice.text == once.text, name
+        assert twice.status == "Nothing was reordered", name
 
 
 def test_a_real_asset_ends_up_in_the_asked_for_order():

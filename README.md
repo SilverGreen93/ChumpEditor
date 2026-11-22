@@ -16,7 +16,12 @@ Features:
 For CLI, the extension picks the direction: a `.chump` (or `.cdp`) is expanded into
 `.txt`, a `.txt` is packed back into `.chump`. The text that comes out is laid
 out the way Trainz writes it - UTF-8 with a BOM, CRLF line endings, values
-starting on column 40 - so a file you never touched comes back byte for byte.
+starting on column 40 - with one addition of our own: every container is set off
+from the tags beside it with a blank line, at the top of the file and as far down
+inside other containers as the file goes, which is the same layout rule
+[Reorder tags](#reorder-tags) follows. A file you never touched comes back byte
+for byte; the one thing the text form cannot carry is the type of a number, so a
+float that reads out whole (`fontcolor   0`) goes back as an int.
 
 ## Getting Started
 
@@ -101,7 +106,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also sets every container off from the tags
-  around it with a blank line.
+  around it with a blank line; a file the editor expands is written that way from
+  the start, at every depth, so the tweak is usually only asked for the order.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -295,7 +301,10 @@ next one begins.  None goes in beside a brace - above another `}` would drive a
 wedge between a tag and the container it is written inside, and below a `{` would
 part a container from the brace it opens - and none at the start or the end of the
 file, where there is nothing to separate.  A blank line already there is left as it
-is, which is why one gap between two containers serves the two of them.
+is, which is why one gap between two containers serves the two of them.  The decoder
+follows this rule too, so expanding a `.chump` puts text on screen with its
+containers already set off at every depth, and the tweak is left with only the
+order to fix.
 
 Nothing inside a container is moved out of it, and a container moves as one block,
 so a subtag cannot be split from the braces holding it. The blank lines under a
@@ -393,7 +402,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         496 tests
+tests/                         504 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)
@@ -414,8 +423,10 @@ python -m pytest
 
 The samples in `tests/test_files` are ground truth: each `.chump` is expanded
 and the text compared to the sample `.txt`, then packed back and compared to
-the original bytes. Those files are kept byte-exact by `.gitattributes`, so
-don't let an editor rewrite them.
+the original bytes.  `semnal.chump` is the one sample with no `.txt` pair and
+no byte-exact way back: it is a real signal asset, there to show the blank lines
+around containers written deep inside other containers.  Those files are kept
+byte-exact by `.gitattributes`, so don't let an editor rewrite them.
 
 ## Building
 

@@ -32,6 +32,10 @@ An int or float tag whose value is longer than one element holds a run of
 them, one after another until the tag length is used up, and the text form
 writes that run comma separated (``camera   -1.058,0.522,0.887``).
 
+The text form carries no type marker, so a float that reads out whole reads
+back as an int (a ``fontcolor   0`` stored as type 02 goes back as type 01);
+such a file comes back with that one byte changed and the same tags.
+
 Unknown types are kept as ``RawValue``: their bytes are preserved so a file
 that uses types this code does not know about still round-trips.
 """
@@ -536,9 +540,18 @@ def _as_int(value: object) -> int:
 # rendering the text form
 # --------------------------------------------------------------------------
 def render_text(root: Tag, *, eol: str = "\r\n") -> str:
-    """The indented text form of a container, as the original expander wrote it."""
+    """The indented text form of a container, the way the expander wrote one.
+
+    Every container comes out set off from the tags beside it with a blank line,
+    at the top of the file and as far down inside other containers as the file
+    goes: a gap under its ``}`` where a tag stands there, and a gap above the line
+    naming it where a tag stands there.  The expander left that line between the
+    entries at the top of the file only; carrying it down every level is the same
+    rule the editor's Reorder tags tweak asks for, which ``tweaks`` spells out in
+    ``_the_blank_lines_to_open``.
+    """
     lines = [""]
-    _render_tags(root.tags, 0, lines, eol)
+    _render_tags(root.tags, 0, lines)
     return eol.join(lines) + eol
 
 
@@ -557,20 +570,32 @@ def dump_text(root: Tag, path: str | Path, *, eol: str = "\r\n") -> Path:
     return target
 
 
-def _render_tags(tags: Sequence[Tag], level: int, lines: list[str], eol: str) -> None:
-    for tag in tags:
-        if level == 0 and tag.is_container:
-            # config.txt files from the Trainz tools leave a line between the
-            # entries at the top of the file
-            lines.append("")
-        if tag.is_container:
-            # a container's name stands alone, the brace opens the next line
-            lines.append(_render_name(tag.name, level, padded=False))
-            lines.append(" " * (2 * level) + "{")
-            _render_tags(tag.tags, level + 1, lines, eol)
-            lines.append(" " * (2 * level) + "}")
-        else:
+def _render_tags(tags: Sequence[Tag], level: int, lines: list[str]) -> None:
+    """One container's tags, written at this indent, each container set off.
+
+    A blank line beside a container is what tells it apart from the tags written
+    level with it: without one above, its name sits straight under the value over
+    it, and without one below, its ``}`` sits straight above the tag under it.  One
+    blank line does both jobs at once, so a container standing after another
+    container asks for nothing of its own - the gap under the brace above it is
+    already the gap above its name.  Nothing goes in below the opening brace or
+    above the closing brace of the container these tags belong to, and nothing at
+    the start or the end of them, where there is no tag on the other side to
+    separate.
+    """
+    for before, tag in enumerate(tags):
+        if not tag.is_container:
             lines.append(_render_name(tag.name, level) + _render_value(tag.value, tag.value_type))
+            continue
+        if before and not tags[before - 1].is_container:
+            lines.append("")
+        # a container's name stands alone, the brace opens the next line
+        lines.append(_render_name(tag.name, level, padded=False))
+        lines.append(" " * (2 * level) + "{")
+        _render_tags(tag.tags, level + 1, lines)
+        lines.append(" " * (2 * level) + "}")
+        if before + 1 < len(tags):
+            lines.append("")
 
 
 def _render_name(name: str, level: int, *, padded: bool = True) -> str:

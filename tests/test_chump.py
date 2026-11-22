@@ -609,7 +609,7 @@ def test_values_start_on_the_value_column():
 
 def test_render_a_container():
     text = render_text(Tag("<root>", [Tag.container("t", [Tag("k", (), 1, INT32)])]))
-    assert text == "\r\n\r\nt\r\n{\r\n  k" + " " * 37 + "1\r\n}\r\n"
+    assert text == "\r\nt\r\n{\r\n  k" + " " * 37 + "1\r\n}\r\n"
 
 
 def test_a_container_is_indented_two_spaces_per_level():
@@ -619,7 +619,7 @@ def test_a_container_is_indented_two_spaces_per_level():
     assert "    k" + " " * 35 + "1" in text
 
 
-def test_a_blank_line_separates_the_entries_at_the_top_of_the_file():
+def test_a_container_is_set_off_from_the_tags_beside_it():
     text = render_text(Tag("<root>", [
         Tag("kind", (), "scenery", STRING),
         Tag.container("t", []),
@@ -632,9 +632,63 @@ def test_a_blank_line_separates_the_entries_at_the_top_of_the_file():
         "t",
         "{",
         "}",
+        "",
         "k" + " " * 39 + "1",
         "",
     ]
+
+
+def test_one_blank_line_serves_two_containers_written_one_after_the_other():
+    text = render_text(Tag("<root>", [
+        Tag("kind", (), "scenery", STRING),
+        Tag.container("a", [Tag("k", (), 1, INT32)]),
+        Tag.container("b", []),
+        Tag("era", (), 3, INT32),
+    ]))
+    assert text.split("\r\n") == [
+        "",
+        "kind" + " " * 36 + '"scenery"',
+        "",
+        "a",
+        "{",
+        "  k" + " " * 37 + "1",
+        "}",
+        "",
+        "b",
+        "{",
+        "}",
+        "",
+        "era" + " " * 37 + "3",
+        "",
+    ]
+
+
+def test_the_containers_inside_a_container_are_set_off_as_well():
+    text = render_text(Tag("<root>", [Tag.container("outer", [
+        Tag("kind", (), "x", STRING),
+        Tag.container("inner", [Tag("k", (), 1, INT32)]),
+        Tag("era", (), 3, INT32),
+    ])]))
+    assert text.split("\r\n") == [
+        "",
+        "outer",
+        "{",
+        "  kind" + " " * 34 + '"x"',
+        "",
+        "  inner",
+        "  {",
+        "    k" + " " * 35 + "1",
+        "  }",
+        "",
+        "  era" + " " * 35 + "3",
+        "}",
+        "",
+    ]
+
+
+def test_no_blank_line_goes_next_to_a_brace_or_at_the_ends_of_the_file():
+    text = render_text(Tag("<root>", [Tag.container("a", [Tag.container("b", [])])]))
+    assert text.split("\r\n") == ["", "a", "{", "  b", "  {", "  }", "}", ""]
 
 
 def test_render_an_empty_string():
@@ -650,7 +704,7 @@ def test_render_a_null_tag():
 
 
 def test_render_an_empty_container():
-    assert render_text(Tag("<root>", [Tag("era", [])])) == "\r\n\r\nera\r\n{\r\n}\r\n"
+    assert render_text(Tag("<root>", [Tag("era", [])])) == "\r\nera\r\n{\r\n}\r\n"
 
 
 def test_render_a_binary_value_as_the_bytes_it_holds():
@@ -928,6 +982,36 @@ def test_config1_agrees_with_its_text_file_about_the_tag_tree():
     assert text.tags[11].tags[0].tags[0].value_type == INT32
     assert chump.tags[11].tags[0].tags[0].value_type == INT32
     assert text.tags[12].value_type == KUID == chump.tags[12].value_type
+
+
+def test_a_signal_asset_decodes_into_text_that_reads_back_as_the_same_text():
+    # semnal.chump is a real signal asset: 24 tags at the top, containers inside
+    # containers (a signals container holding one container per signal, each of
+    # those holding a value), and a license running over a dozen lines
+    root = parse_chump((SAMPLES / "semnal.chump").read_bytes())
+    text = render_text(root)
+    signals = root.get("signals")
+
+    check_text(text)
+    assert [tag.name for tag in signals.tags] == ["0", "4", "8"]
+    assert all(tag.is_container for tag in signals.tags)
+    assert render_text(parse_text(text)) == text
+
+
+def test_a_signal_asset_sets_its_containers_off_however_deep_they_are():
+    # the signals of a signal asset are containers two levels down, written one
+    # under another, and they are set off just like the containers at the top
+    text = render_text(load_chump(SAMPLES / "semnal.chump"))
+
+    assert (
+        "}\r\n\r\nsignals\r\n{\r\n"
+        "  0\r\n  {\r\n    light" + " " * 31 + "3\r\n  }\r\n"
+        "\r\n"
+        "  4\r\n  {\r\n    light" + " " * 31 + "3\r\n  }\r\n"
+        "\r\n"
+        "  8\r\n  {\r\n    light" + " " * 31 + "3\r\n  }\r\n"
+        "}\r\n\r\nlights\r\n{\r\n}\r\n\r\nmesh-table\r\n"
+    ) in text
 
 
 # --------------------------------------------------------------------------
