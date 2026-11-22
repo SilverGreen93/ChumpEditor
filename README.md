@@ -2,7 +2,7 @@
 
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SilverGreen93/ChumpEditor)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) [![Downloads (Latest Release)](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/latest/total?label=latest%20release%20downloads)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/total?label=total%20downloads)
 
-Editor for config.chump or config.txt files.
+Editor for `config.chump` or `config.txt` files.
 
 Features:
 
@@ -10,7 +10,8 @@ Features:
 - Can be used directly as an editor for config.txt/config.chump files
 - Contains tweaks to modernize obsolete config files (see below)
 - Offers syntax highlighting and line numbers
-- Finds and replaces text in a panel along the bottom of the window (Ctrl+F)
+- Syntax checking for files
+- Quick find & replace
 
 ![screenshot](assets/screenshot.png)
 
@@ -43,8 +44,7 @@ python chumpeditor_cli_entry.py config.chump
 python chumpeditor_gui_entry.py
 ```
 
-Prebuilt Windows builds come as a portable zip and a per-user MSI; see
-[Releases](https://github.com/SilverGreen93/ChumpEditor/releases/latest).
+Prebuilt Windows builds come as a portable zip and a per-user MSI; see [Releases](https://github.com/SilverGreen93/ChumpEditor/releases/latest).
 
 ## Command line
 
@@ -564,8 +564,7 @@ Add/Remove Programs. **ChumpEditor**, without one, is what a person types:
 
 ## Notes on the format
 
-[chump-format.md](https://github.com/SilverGreen93/CDPExplorer/blob/master/chump-format.md)
-is the reference. The short version:
+See [chump-format.md](https://github.com/SilverGreen93/CDPExplorer/blob/master/chump-format.md) for the reference. The short version:
 
 - A `.chump` starts with `ACS$`, the format version (1), a reserved zero and
   the content length; the tags start at offset 16.
