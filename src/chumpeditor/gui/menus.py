@@ -32,7 +32,8 @@ def build_menus(window: QMainWindow) -> None:
 
 
 def _file(menu, window: QMainWindow) -> None:
-    """Open a file, write the text out in either form, and finish."""
+    """Open a file, write the text out in either form, say what is wrong with
+    it, and finish."""
     _add(menu, "&Open file...", QKeySequence.StandardKey.Open, window.prompt_open)
 
     menu.addSeparator()
@@ -42,6 +43,10 @@ def _file(menu, window: QMainWindow) -> None:
     menu.addSeparator()
     _add(menu, "E&xport txt", QKeySequence("Ctrl+E"), lambda: window.export())
     _add(menu, "Export txt as...", None, lambda: window.export(ask=True))
+
+    menu.addSeparator()
+    # the rules a write is guarded by, asked for on their own and all at once
+    _add(menu, "Sy&ntax check", QKeySequence("F5"), window.syntax_check)
 
     menu.addSeparator()
     _add(menu, "E&xit", QKeySequence.StandardKey.Quit, window.close)

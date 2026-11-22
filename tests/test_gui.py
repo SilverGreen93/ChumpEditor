@@ -55,7 +55,7 @@ from chumpeditor.gui.resources import (  # noqa: E402
     resource_path,
     window_icon,
 )
-from chumpeditor.gui.window import UNTITLED  # noqa: E402
+from chumpeditor.gui.window import REPORT_LIMIT, UNTITLED  # noqa: E402
 
 SAMPLES = Path(__file__).parent / "test_files"
 
@@ -635,13 +635,15 @@ def test_the_menu_bar_offers_file_edit_tweaks_and_help(window):
     ]
 
 
-def test_the_file_menu_offers_open_then_the_two_forms_of_writing_then_exit(window):
+def test_the_file_menu_offers_open_then_writing_then_a_check_then_exit(window):
     assert labels(menu_of(window, "File")) == [
         "Open file...",
         "-",
         "Save chump", "Save chump as...",
         "-",
         "Export txt", "Export txt as...",
+        "-",
+        "Syntax check",
         "-",
         "Exit",
     ]
@@ -651,6 +653,8 @@ def test_the_file_menu_carries_the_shortcuts_people_already_know(window):
     assert keys(window, "File", "Open file...") == "Ctrl+O"
     assert keys(window, "File", "Save chump") == "Ctrl+S"
     assert keys(window, "File", "Export txt") == "Ctrl+E"
+    # a check is pressed rather than hunted for, and F5 is where everyone looks
+    assert keys(window, "File", "Syntax check") == "F5"
     # the two that always open a dialog are the two nobody presses blind
     assert not keys(window, "File", "Save chump as...")
     assert not keys(window, "File", "Export txt as...")
@@ -1555,6 +1559,90 @@ def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path
     assert window.editor.document().isModified()
     assert window.windowTitle() == f"config1.chump * - {APP_TITLE}"
     assert list(tmp_path.glob("*.chump")) == [source]
+
+
+# ---------------------------------------------------------------------------
+# File > Syntax check: the rules a write is guarded by, asked for on their own
+# ---------------------------------------------------------------------------
+def test_a_syntax_check_names_everything_wrong_with_the_text(window, dialogs):
+    """One press, one list: the whole of what is wrong, not only the first fault."""
+    replace(window, 'username "abc"\nusername "bcdf"\nk <kuid:1:2\nkind "interior\n}\n')
+
+    click(window, "File", "Syntax check")
+    assert dialogs[-1] == (
+        "warn",
+        "Syntax check",
+        "Line 2: tag 'username' is written twice at the same level, "
+        "the first one on line 1\n"
+        "Line 3: value for tag 'k': '<' with no '>' after it\n"
+        "Line 4: quoted value for tag 'kind' is never closed",
+    )
+    assert window.statusBar().currentMessage() == "3 problems found"
+
+
+def test_a_syntax_check_of_a_file_with_nothing_wrong_says_so(window, tmp_path, dialogs):
+    """A check that stays quiet when all is well cannot be told from one that
+    did nothing at all."""
+    source = copy("config2.txt", tmp_path)
+    window.open_path(source)
+
+    click(window, "File", "Syntax check")
+    assert dialogs[-1] == ("info", "Syntax check", "No problems found.")
+    assert window.statusBar().currentMessage() == "No problems found"
+
+
+def test_one_fault_is_said_as_one_fault(window, dialogs):
+    replace(window, "k 1\nk 2\n")
+
+    window.syntax_check()
+    assert dialogs[-1][0] == "warn"
+    assert dialogs[-1][2] == (
+        "Line 2: tag 'k' is written twice at the same level, the first one on line 1"
+    )
+    assert window.statusBar().currentMessage() == "1 problem found"
+
+
+def test_a_syntax_check_writes_nothing_and_changes_nothing(window, picks, tmp_path, dialogs):
+    source = copy("config1.chump", tmp_path)
+    before = source.read_bytes()
+    window.open_path(source)
+    replace(window, "k 1\nk 2\n")
+    on_screen = text_of(window.editor)
+
+    window.syntax_check()
+    assert text_of(window.editor) == on_screen  # a check only reads
+    assert picks.asked == []  # and never reaches for a file
+    assert list(tmp_path.glob("*")) == [source]
+    assert source.read_bytes() == before
+    assert window.windowTitle() == f"config1.chump * - {APP_TITLE}"
+
+
+def test_a_long_report_is_cut_short_and_says_the_rest(window, dialogs):
+    broken = "".join(f't{n} bob"\n' for n in range(REPORT_LIMIT + 5))
+    replace(window, broken)
+
+    window.syntax_check()
+    lines = dialogs[-1][2].splitlines()
+    assert lines[0] == (
+        "Line 1: value for tag 't0' has a quote mark and does not start with one"
+    )
+    assert len(lines) == REPORT_LIMIT + 1
+    assert lines[-1] == f"... and {REPORT_LIMIT + 5 - REPORT_LIMIT} more"
+    assert window.statusBar().currentMessage() == f"{REPORT_LIMIT + 5} problems found"
+
+
+def test_a_file_with_a_duplicate_still_opens_and_only_the_check_minds(
+    window, tmp_path, dialogs
+):
+    """The rules stop a write, not a read: what is on disk is still worth seeing."""
+    source = tmp_path / "twice.txt"
+    source.write_text('username "abc"\nusername "bcdf"\n', encoding="utf-8")
+    window.open_path(source)
+
+    assert text_of(window.editor) == 'username "abc"\nusername "bcdf"\n'
+    window.syntax_check()
+    assert "Line 2: tag 'username' is written twice at the same level" in dialogs[-1][2]
+    assert source.read_text(encoding="utf-8") == 'username "abc"\nusername "bcdf"\n'
 
 
 def test_closing_asks_before_losing_a_change(window, monkeypatch, tmp_path):

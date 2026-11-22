@@ -671,7 +671,7 @@ def parse_text(text: str) -> Tag:
     lines, eol = _split_lines(text)
     tags, index = _parse_lines(lines, 0, eol)
     if index != len(lines):
-        raise ChumpError(f"line {index + 1}: '}}' with no container open")
+        raise ChumpError(str(_no_container_open(index + 1)))
     return Tag("<root>", tags)
 
 
@@ -709,7 +709,7 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
             # closes; at the top level nothing can close, and parse_text says so
             return tags, index
         if stripped == "{":
-            raise ChumpError(f"line {index + 1}: '{{' without a tag name before it")
+            raise ChumpError(str(_brace_with_no_name(index + 1)))
 
         name, rest = _split_name(stripped)
         opened_at = index
@@ -719,9 +719,7 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
             # most config.txt files write "kuid-table {"
             children, index = _parse_lines(lines, index, eol)
             if index >= len(lines):
-                raise ChumpError(
-                    f"line {opened_at + 1}: container '{name}' is never closed"
-                )
+                raise ChumpError(str(_never_closed(name, opened_at + 1)))
             index += 1
             tags.append(Tag.container(name, children))
         elif rest:
@@ -731,9 +729,7 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
             index += 1
             children, index = _parse_lines(lines, index, eol)
             if index >= len(lines):
-                raise ChumpError(
-                    f"line {opened_at + 1}: container '{name}' is never closed"
-                )
+                raise ChumpError(str(_never_closed(name, opened_at + 1)))
             index += 1  # past the '}' the inner call stopped at
             tags.append(Tag.container(name, children))
         else:
@@ -754,11 +750,52 @@ def _split_name(stripped: str) -> tuple[str, str]:
 def check_text(text: str) -> Tag:
     """Parse text in the indented form, first blaming a line for what breaks it.
 
-    ``parse_text`` understands the layout of a chump text file and stops at a
-    container whose ``{`` / ``}`` pair is missing one half.  What it cannot see
-    is a quote or a ``<`` / ``>`` pair broken by hand, or one name written twice
-    in the same container, because all of that looks like ordinary text.  So each
-    line is looked at first:
+    ``find_problems`` holds the rules and says them one at a time; the one on the
+    earliest line is what is raised here, so a write that is turned down says
+    exactly what the Syntax check report says.  With nothing found, ``parse_text``
+    has the last word, and what only it can see - a comma separated value that
+    mixes types, an element that is empty - is reported the way it always was.
+    """
+    problems = find_problems(text)
+    if problems:
+        raise ChumpError(str(problems[0]))
+    return parse_text(text)
+
+
+@dataclass(frozen=True)
+class Problem:
+    """One thing wrong with the text of a chump file, and the line it is on.
+
+    The line number lives apart from the words so a report can put them in a list
+    of its own, and a refusal can say the same thing out loud.
+    """
+
+    line: int
+    message: str
+
+    def __str__(self) -> str:
+        return f"line {self.line}: {self.message}"
+
+
+class _ReadingStops(Exception):
+    """The text stopped making sense, so what is left of it is not worth reading.
+
+    Only the scanner raises this, to say that the rest of the file belongs to
+    something that was never closed: a value whose closing quote never comes, or
+    a container whose ``}`` never comes.  Blaming those later lines as well would
+    blame one mistake twice, and what follows an unclosed value is not tags.
+    """
+
+
+def find_problems(text: str) -> list[Problem]:
+    """Everything wrong with the text of a chump file, in the order of its lines.
+
+    ``parse_text`` understands the layout of a chump text file and stops at the
+    first thing that makes it unreadable.  That is enough to refuse a write, but
+    it says one thing at a time, and what it cannot see at all is a quote or a
+    ``<`` / ``>`` pair broken by hand, or one name written twice in the same
+    container, because all of that looks like ordinary text.  So the lines are
+    walked here as well, and nothing stops the walk early:
 
     * a quoted value whose quote marks do not come in twos is refused.  The
       reader takes the value from the first quote to the last one, so a loose
@@ -782,78 +819,152 @@ def check_text(text: str) -> Tag:
       things and the reader has no way to choose between them.  A name written
       again further down is a different tag, since it belongs to another
       container, and names are compared exactly, which is how the binary form
-      stores them.
+      stores them;
+    * a ``{`` with no tag name before it, a ``}`` with nothing open for it to
+      close, a container whose ``}`` never comes and a quoted value whose closing
+      quote never comes: the layout faults the reader sees too, named here with
+      the same words so the two never disagree.
 
     Quotes that do come in twos are taken at face value, however odd they look:
-    a value holding ``say ""hi""`` is a string and stays one, and a bracket in
-    a license string is prose.  A value whose run never reaches a closing quote
-    at all is left to the parser, which says so with the line the value started
-    on.  The walk follows the same lines as ``_parse_lines`` and reads each line
-    before the parser turns it into tags, which is what lets it name the line at
-    fault, and it keeps one set of names per open container, which is what lets
-    it name the line the first copy of a repeated name was written on.
+    a value holding ``say ""hi""`` is a string and stays one, and a bracket in a
+    license string is prose.  The walk follows the same lines as ``_parse_lines``
+    and keeps one set of names per open container, which is what lets it name the
+    line a fault stands on and the line the first copy of a repeated name was
+    written on.  A text with nothing wrong with it comes back as an empty list.
     """
-    lines = text.splitlines()
-    index, size = 0, len(lines)
+    lines, _eol = _split_lines(text)
+    problems: list[Problem] = []
     # the containers standing open, each with the names written in it and the
-    # line each name was written on
+    # line each name was written on; the first set is the top of the file
     written: list[dict[str, int]] = [{}]
+    try:
+        index = _scan_lines(lines, 0, written, problems)
+        if index < len(lines):
+            # a '}' with the whole file read and nothing open: the file ends
+            # here, but what stands after it is still worth looking at
+            problems.append(_no_container_open(index + 1))
+            _scan_lines(lines, index + 1, written, problems)
+    except _ReadingStops:
+        pass
+    problems.sort(key=lambda problem: problem.line)
+    return problems
+
+
+def _scan_lines(
+    lines: list[str], index: int, written: list[dict[str, int]], problems: list[Problem]
+) -> int:
+    """The body of one container, with every problem about it written down.
+
+    The same walk as ``_parse_lines``, except that a brace which does not fit is
+    written down and the walk carries on: one pass over a file finds all of its
+    problems rather than the one that happens to stop the reader.  Returns where
+    the body stops - the ``}`` that closes it, left for the caller, or the end of
+    the file.
+    """
+    size = len(lines)
     while index < size:
-        line = lines[index].strip()
+        stripped = lines[index].strip()
+        if not stripped:
+            index += 1
+            continue
+        if stripped == "}":
+            return index
+        if stripped == "{":
+            # no tag name before the brace.  Its name is gone, so read what
+            # follows as if a name did stand there and the body still gets said
+            problems.append(_brace_with_no_name(index + 1))
+            index = _the_body_of(lines, index + 1, "", index, written, problems)
+            continue
+
+        name, rest = _split_name(stripped)
+        opened_at = index
         index += 1
-        if not line:
-            continue
-        if line == "}":
-            # which container this closes is the parser's business; here the
-            # brace only closes the set of names collected for it.  A brace with
-            # nothing open under it is a file whose layout is broken, and the
-            # parser blames that by line, so nothing further is read here.
-            if len(written) == 1:
-                break
-            written.pop()
-            continue
-        if line == "{":
-            # a brace with no tag name before it, which the parser refuses too
-            break
-        name, rest = _split_name(line)
         if '"' in name:
-            raise ChumpError(f"line {index}: tag name '{name}' has a quote mark in it")
-        _check_repeated(name, index, written[-1])
-        if not rest:
-            if index < size and lines[index].strip() == "{":
-                index += 1  # the brace this name opens, its body comes after
-                written.append({})
-            continue
+            problems.append(Problem(index, f"tag name '{name}' has a quote mark in it"))
+        _add(problems, _repeated_name(name, index, written[-1]))
         if rest == "{":
-            written.append({})  # the brace written on the name's own line
+            index = _the_body_of(lines, index, name, opened_at, written, problems)
             continue
-        if rest.startswith('"'):
-            if len(rest) > 1 and rest.endswith('"'):  # a one line string
-                _check_pairs(name, index, rest.count('"'))
-                continue
-            # a value running over the lines that follow, to the line that ends
-            # with a quote: its marks have to pair up over the whole run
-            opened_on, marks, closed = index, rest.count('"'), False
-            while index < size:
-                marks += lines[index].count('"')
-                if lines[index].endswith('"'):
-                    closed = True
-                    index += 1  # past the line that closed the value
-                    break
-                index += 1
-            if closed:  # otherwise the parser has the better message
-                _check_pairs(name, opened_on, marks)
+        if rest:
+            index = _the_value_of(lines, index, name, opened_at, rest, problems)
             continue
-        if '"' in rest:
-            raise ChumpError(
-                f"line {index}: value for tag '{name}' has a quote mark and does "
-                "not start with one"
-            )
-        _check_brackets(name, index, rest)
-    return parse_text(text)
+        if index < size and lines[index].strip() == "{":
+            # the brace this name opens is on the line below it
+            index = _the_body_of(lines, index + 1, name, opened_at, written, problems)
+            continue
+        # a tag with nothing after it holds nothing, and has nothing to be said
+    return index
 
 
-def _check_repeated(name: str, index: int, names: dict[str, int]) -> None:
+def _the_body_of(
+    lines: list[str], index: int, name: str, opened_at: int,
+    written: list[dict[str, int]], problems: list[Problem]
+) -> int:
+    """What a container holds, from its opening brace, and the line after its ``}``."""
+    written.append({})
+    index = _scan_lines(lines, index, written, problems)
+    if index >= len(lines):
+        if name:  # a brace with no name before it is blamed where it stands
+            problems.append(_never_closed(name, opened_at + 1))
+        raise _ReadingStops
+    written.pop()
+    return index + 1
+
+
+def _the_value_of(
+    lines: list[str], index: int, name: str, opened_at: int, rest: str,
+    problems: list[Problem]
+) -> int:
+    """The lines one value takes up, with every problem about it written down."""
+    line = opened_at + 1
+    if rest.startswith('"'):
+        if len(rest) > 1 and rest.endswith('"'):  # a one line string
+            _add(problems, _unpaired_quotes(name, line, rest.count('"')))
+            return index
+        # a value running over the lines that follow, to the line that ends
+        # with a quote: its marks have to pair up over the whole run
+        marks, size = rest.count('"'), len(lines)
+        while index < size:
+            marks += lines[index].count('"')
+            if lines[index].endswith('"'):
+                _add(problems, _unpaired_quotes(name, line, marks))
+                return index + 1
+            index += 1
+        problems.append(_value_never_closed(name, line))
+        raise _ReadingStops
+    if '"' in rest:
+        problems.append(
+            Problem(line, f"value for tag '{name}' has a quote mark and does "
+                          "not start with one")
+        )
+        return index
+    _add(problems, _unbalanced_brackets(name, line, rest))
+    return index
+
+
+def _add(problems: list[Problem], problem: Problem | None) -> None:
+    """Write a problem down, if there is one."""
+    if problem is not None:
+        problems.append(problem)
+
+
+def _brace_with_no_name(line: int) -> Problem:
+    return Problem(line, "'{' without a tag name before it")
+
+
+def _no_container_open(line: int) -> Problem:
+    return Problem(line, "'}' with no container open")
+
+
+def _never_closed(name: str, line: int) -> Problem:
+    return Problem(line, f"container '{name}' is never closed")
+
+
+def _value_never_closed(name: str, line: int) -> Problem:
+    return Problem(line, f"quoted value for tag '{name}' is never closed")
+
+
+def _repeated_name(name: str, line: int, names: dict[str, int]) -> Problem | None:
     """Complain about a name written twice in the container being read.
 
     ``names`` is the one set for that container: it holds every name written at
@@ -863,24 +974,25 @@ def _check_repeated(name: str, index: int, names: dict[str, int]) -> None:
     """
     first = names.get(name)
     if first is None:
-        names[name] = index
-        return
-    raise ChumpError(
-        f"line {index}: tag '{name}' is written twice at the same level, "
-        f"the first one on line {first}"
+        names[name] = line
+        return None
+    return Problem(
+        line,
+        f"tag '{name}' is written twice at the same level, the first one on "
+        f"line {first}",
     )
 
 
-def _check_pairs(name: str, index: int, marks: int) -> None:
+def _unpaired_quotes(name: str, line: int, marks: int) -> Problem | None:
     """Complain about a quoted value whose quote marks do not come in twos."""
-    if marks % 2:
-        raise ChumpError(
-            f"line {index}: quoted value for tag '{name}' has a quote mark with "
-            "no partner"
-        )
+    if marks % 2 == 0:
+        return None
+    return Problem(
+        line, f"quoted value for tag '{name}' has a quote mark with no partner"
+    )
 
 
-def _check_brackets(name: str, index: int, value: str) -> None:
+def _unbalanced_brackets(name: str, line: int, value: str) -> Problem | None:
     """Complain about a ``<`` or ``>`` in a value that is not wrapped in quotes."""
     depth = 0
     for char in value:
@@ -889,11 +1001,12 @@ def _check_brackets(name: str, index: int, value: str) -> None:
         elif char == ">":
             depth -= 1
             if depth < 0:
-                raise ChumpError(
-                    f"line {index}: value for tag '{name}': '>' with no '<' before it"
+                return Problem(
+                    line, f"value for tag '{name}': '>' with no '<' before it"
                 )
     if depth:
-        raise ChumpError(f"line {index}: value for tag '{name}': '<' with no '>' after it")
+        return Problem(line, f"value for tag '{name}': '<' with no '>' after it")
+    return None
 
 
 def _parse_value_text(
@@ -914,9 +1027,7 @@ def _parse_value_text(
             chunks.append(line)
             index += 1
         else:
-            raise ChumpError(
-                f"line {opened_at + 1}: quoted value for tag '{name}' is never closed"
-            )
+            raise ChumpError(str(_value_never_closed(name, opened_at + 1)))
         return eol.join(chunks), TagType.STRING, index
 
     if rest.startswith("<"):

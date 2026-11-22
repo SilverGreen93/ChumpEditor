@@ -11,7 +11,9 @@ tested on their own:
   original expander wrote one: UTF-8 with a BOM, CRLF line endings;
 * both of them start with ``check_text``, so text the format would misread -
   half a container, a loose quote mark, half a kuid, one name written twice in
-  the same container - is reported instead of written.
+  the same container - is reported instead of written;
+* ``find_problems`` says all of those faults rather than only the first one,
+  which is what the window's Syntax check has to read out.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from .chump import (
     ChumpError,
     check_text,
     dump_chump,
+    find_problems,
     parse_chump,
     read_text_file,
     render_text,
@@ -40,6 +43,7 @@ __all__ = [
     "as_file_text",
     "check_text",
     "filter_string",
+    "find_problems",
     "is_readable",
     "read_document",
     "save_chump",

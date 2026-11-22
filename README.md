@@ -101,7 +101,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
-  chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
+  chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Syntax
+  check (F5), Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
@@ -144,6 +145,25 @@ container
   username                            "bcdf"
 }
 ```
+
+### Syntax check
+
+**File > Syntax check** (F5) asks for those same rules without writing anything.
+A write stops at the first fault it finds, which is the right thing to do to a
+file and a poor way to answer a question, so this says all of them, one per line,
+in the order their lines come:
+
+```
+Line 2: tag 'username' is written twice at the same level, the first one on line 1
+Line 3: value for tag 'k': '<' with no '>' after it
+Line 4: quoted value for tag 'kind' is never closed
+```
+
+What follows an unclosed quoted value is left out of the list, because those
+lines are part of the value rather than tags of their own. The status bar says how
+many were found, and a file with nothing wrong with it is told as well: *No
+problems found*. Nothing on screen is touched and no file is written, so the check
+is worth pressing before a save rather than only after one refused it.
 
 ### Tweaks
 
@@ -425,7 +445,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         517 tests
+tests/                         533 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

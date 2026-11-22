@@ -17,6 +17,7 @@ from chumpeditor.chump import (
     VALUE_COLUMN,
     ChumpError,
     Kuid,
+    Problem,
     RawValue,
     Tag,
     TagType,
@@ -24,6 +25,7 @@ from chumpeditor.chump import (
     convert_file,
     dump_chump,
     dump_text,
+    find_problems,
     hex_to_kuid,
     iter_tags,
     kuid_to_hex,
@@ -992,6 +994,97 @@ def test_a_broken_brace_is_blamed_before_a_name_written_twice():
 def test_a_brace_with_no_name_before_it_is_blamed_before_a_name_written_twice():
     with pytest.raises(ChumpError, match=r"line 1: '\{' without a tag name before it"):
         check_text("{\nx 1\nx 2\n}\n")
+
+
+# --------------------------------------------------------------------------
+# the same rules said all at once, which is what a report is made of
+# --------------------------------------------------------------------------
+def test_text_with_nothing_wrong_has_nothing_to_report():
+    assert find_problems("") == []
+    assert find_problems("   \n\n") == []
+    assert find_problems('username "abc"\n\nc\n{\ndistance 2\n}\n') == []
+
+
+def test_every_fault_in_a_file_is_said_once_in_the_order_of_its_lines():
+    problems = find_problems(
+        'username "abc"\nusername "bcdf"\nk <kuid:1:2\nkind "interior\n}\n'
+    )
+    assert [str(one) for one in problems] == [
+        "line 2: tag 'username' is written twice at the same level, "
+        "the first one on line 1",
+        "line 3: value for tag 'k': '<' with no '>' after it",
+        "line 4: quoted value for tag 'kind' is never closed",
+    ]
+
+
+def test_a_repeated_name_is_said_once_for_each_container_it_is_repeated_in():
+    problems = find_problems("a\n{\nb\n{\nk 1\nk 2\n}\nk 3\nk 4\n}\n")
+    assert [one.line for one in problems] == [6, 9]
+    assert all(one.message.startswith("tag 'k' is written twice") for one in problems)
+
+
+def test_the_lines_an_unclosed_value_swallow_are_not_blamed_again():
+    """What stands after an unclosing quote is part of the value rather than a
+    set of tags, so blaming those lines as well would blame one mistake twice."""
+    assert [str(one) for one in find_problems('kind "interior\nk 1\nk 2\n}\n')] == [
+        "line 1: quoted value for tag 'kind' is never closed"
+    ]
+
+
+def test_the_innermost_container_is_the_one_said_to_be_never_closed():
+    assert [str(one) for one in find_problems("a\n{\nb\n{\n")] == [
+        "line 3: container 'b' is never closed"
+    ]
+
+
+def test_a_broken_brace_is_said_and_so_is_what_was_written_behind_it():
+    problems = find_problems("{\nx 1\nx 2\n}\n")
+    assert [str(one) for one in problems] == [
+        "line 1: '{' without a tag name before it",
+        "line 3: tag 'x' is written twice at the same level, the first one on line 2",
+    ]
+
+
+def test_a_stray_closing_brace_is_said_and_the_tags_after_it_are_said_too():
+    problems = find_problems("a\n{\nx 1\n}\n}\nx 2\nx 2\n")
+    assert [str(one) for one in problems] == [
+        "line 5: '}' with no container open",
+        "line 7: tag 'x' is written twice at the same level, the first one on line 6",
+    ]
+
+
+def test_a_problem_reads_as_its_line_and_what_is_wrong_with_it():
+    assert str(Problem(4, "container 'a' is never closed")) == (
+        "line 4: container 'a' is never closed"
+    )
+
+
+def test_the_first_problem_is_the_reason_a_write_is_refused():
+    """The report and the refusal say the same thing, or a text that a check
+    called clean would still be turned down when it came to be written."""
+    broken = (
+        'username bob"\n',
+        'k 1\nt\n{\nk "abc\n}\n',
+        "k <kuid:1:2\n",
+        "{\nx 1\nx 2\n}\n",
+        "a\n{\nx 1\n}\n}\nx 2\n",
+        'username "abc"\nusername "bcdf"\n',
+        "a\n{\nb\n{\n",
+        "kuid-table\n{\n",
+    )
+    for text in broken:
+        problems = find_problems(text)
+        assert problems, text
+        with pytest.raises(ChumpError) as exc:
+            check_text(text)
+        assert str(exc.value) == str(problems[0]), text
+
+
+def test_the_sample_files_have_nothing_to_report():
+    for stem in ("config1", "config2", "config3", "obsolete_config"):
+        assert find_problems(read_text_file(SAMPLES / f"{stem}.txt")) == []
+    for stem in ("config1", "config2", "config3", "semnal"):
+        assert find_problems(render_text(load_chump(SAMPLES / f"{stem}.chump"))) == []
 
 
 def test_the_sample_text_files_pass_the_check():

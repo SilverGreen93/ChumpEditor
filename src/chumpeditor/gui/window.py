@@ -19,13 +19,14 @@ from typing import Callable
 from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
 
 from .. import tweaks
-from ..chump import ChumpError
+from ..chump import ChumpError, Problem
 from ..document import (
     CHUMP_GROUP,
     TEXT_GROUP,
     as_file_text,
     check_text,
     filter_string,
+    find_problems,
     is_readable,
     read_document,
     save_chump,
@@ -38,13 +39,27 @@ from .editor import RichTextEditor
 from .menus import build_menus
 from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, window_icon
 
-__all__ = ["CHUMP_WRITE", "ChumpWindow", "TEXT_WRITE", "UNTITLED", "WINDOW_SIZE"]
+__all__ = [
+    "CHUMP_WRITE",
+    "ChumpWindow",
+    "REPORT_LIMIT",
+    "SYNTAX_TITLE",
+    "TEXT_WRITE",
+    "UNTITLED",
+    "WINDOW_SIZE",
+]
 
 #: the starting size: wide enough for a value on column 40 plus its text
 WINDOW_SIZE = (940, 660)
 
 #: what the title shows before any file is in the editor
 UNTITLED = "Untitled"
+
+#: what the report of a syntax check is called, in the menu and on the box
+SYNTAX_TITLE = "Syntax check"
+
+#: how many problems one box will name before it says how many more there are
+REPORT_LIMIT = 25
 
 
 @dataclass(frozen=True)
@@ -65,6 +80,13 @@ class WriteForm:
 
 CHUMP_WRITE = WriteForm("Save chump", "Saved", ".chump", CHUMP_GROUP, save_chump)
 TEXT_WRITE = WriteForm("Export txt", "Exported", ".txt", TEXT_GROUP, save_text)
+
+
+def _counted(problems: list[Problem]) -> str:
+    """How much a report found, in as few words as the status bar has room for."""
+    if not problems:
+        return "No problems found"
+    return f"{len(problems)} problem{'' if len(problems) == 1 else 's'} found"
 
 
 class ChumpWindow(QMainWindow):
@@ -178,6 +200,27 @@ class ChumpWindow(QMainWindow):
     def export(self, *, ask: bool = False) -> Path | None:
         """File > Export txt: the text as a .txt file, spacing and all."""
         return self._write(TEXT_WRITE, ask)
+
+    def syntax_check(self) -> None:
+        """File > Syntax check: every rule a write is guarded by, said at once.
+
+        A write stops at the first fault it finds, which is the right thing to do
+        to a file and a poor way to answer a question.  Here the same rules are
+        read out one line each, in the order the lines come, so a person can fix
+        a file in one pass instead of pressing Save twenty times.  Nothing on
+        screen is touched: a check only reads.  An empty report is said as well,
+        because an answer that stays silent when all is well is indistinguishable
+        from a shortcut that did nothing.
+        """
+        problems = find_problems(as_file_text(self.editor.toPlainText()))
+        self.say(_counted(problems))
+        if not problems:
+            QMessageBox.information(self, SYNTAX_TITLE, "No problems found.")
+            return
+        report = [f"Line {one.line}: {one.message}" for one in problems[:REPORT_LIMIT]]
+        if len(problems) > REPORT_LIMIT:
+            report.append(f"... and {len(problems) - REPORT_LIMIT} more")
+        QMessageBox.warning(self, SYNTAX_TITLE, "\n".join(report))
 
     def about(self) -> None:
         """Help > About: what this is, and where it comes from."""
