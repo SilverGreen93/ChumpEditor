@@ -225,20 +225,15 @@ shape to them, and an asset edited by hand over ten years tends to lose it. **Tw
 
 - `kuid` and then `username`, whatever was written above them;
 - every tag that holds one value, in the order they were found;
-- every container, in the order they were found, with its subtags exactly as they
-  stood;
+- every container, in the order they were found;
 - `kuid-table` and `obsolete-table` after all the other containers, when the file
   has them.
 
-On top of the order, every container is set off from the tags around it: a blank
-line goes under its closing `}` wherever another tag follows it, and another above
-the line naming it wherever a tag stands there, however deep inside the file the
-container sits, since those gaps are what show where one container ends and the
-next one begins.  None goes in beside a brace - above another `}` would drive a
-wedge between a tag and the container it is written inside, and below a `{` would
-part a container from the brace it opens - and none at the start or the end of the
-file, where there is nothing to separate.  A blank line already there is left as it
-is, which is why one gap between two containers serves the two of them.
+The same tidy-up reaches inside the containers, by a simpler rule: the tags
+holding a value come first and the containers written beside them come after,
+each keeping the order they were found in, at every depth of the file. Down there
+no name is special, so a `kuid` written inside a sub-container stays where the
+file put it.
 
 ```
 kind                                    "interior"
@@ -246,7 +241,11 @@ mesh-table
 {
   default
   {
+    effects
+    {
+    }
     mesh                                "interior.im"
+    auto-create                         1
   }
 }
 kuid                                    <kuid:79373:50023>
@@ -271,6 +270,11 @@ mesh-table
   default
   {
     mesh                                "interior.im"
+    auto-create                         1
+
+    effects
+    {
+    }
   }
 }
 
@@ -283,21 +287,32 @@ obsolete-table
 }
 ```
 
+On top of the order, every container is set off from the tags around it: a blank
+line goes under its closing `}` wherever another tag follows it, and another above
+the line naming it wherever a tag stands there, however deep inside the file the
+container sits, since those gaps are what show where one container ends and the
+next one begins.  None goes in beside a brace - above another `}` would drive a
+wedge between a tag and the container it is written inside, and below a `{` would
+part a container from the brace it opens - and none at the start or the end of the
+file, where there is nothing to separate.  A blank line already there is left as it
+is, which is why one gap between two containers serves the two of them.
+
 Nothing inside a container is moved out of it, and a container moves as one block,
 so a subtag cannot be split from the braces holding it. The blank lines under a
 tag travel with it, and the blank lines at the end of the file stay at the end, so
 the file keeps the shape it had. Only the stretch between the first tag out of
-place and the last one is rewritten, plus one short edit for each blank line that
-has to come in where nothing moved - everything else is not touched, which is why
-pressing the item a second time says *Nothing was reordered*. One press of Undo
-takes the whole change back, the moved tags and the blank lines together.
+place and the last one is rewritten, in every container that has tags out of place
+as well as at the top, plus one short edit for each blank line that has to come in
+where nothing moved - everything else is not touched, which is why pressing the
+item a second time says *Nothing was reordered*. One press of Undo takes the whole
+change back, every stretch and every blank line together.
 
-The message names every tag that moved and the line it moved to, and every
-container that gained a blank line - saying whether it went above the line naming
-the container or under the `}` closing it, and which line it went beside. A tag
-whose value or container is never closed, and a line at the top that is not a tag
-at all, mean there is no safe line to cut the file on: nothing moves at all, and
-the message is a warning naming the line.
+The message names every tag that moved, in a container as well as at the top, and
+the line it moved to, and every container that gained a blank line - saying whether
+it went above the line naming the container or under the `}` closing it, and which
+line it went beside. A tag whose value or container is never closed, and a line
+that is not a tag at all, mean there is no safe line to cut the file on: nothing
+moves at all, and the message is a warning naming the line.
 
 ### Colour themes
 
@@ -378,7 +393,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         487 tests
+tests/                         496 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

@@ -73,6 +73,24 @@ def the_shape_of(tag):
     return (tag.name, tag.value, tuple(the_shape_of(child) for child in tag.tags))
 
 
+def out_of_order(tag) -> list[str]:
+    """The values written below a sub-container, in this tag and below it.
+
+    A container holds its tags in order when nothing holding a value is written
+    after a container written inside it, which is asked of every container of the
+    file rather than only of the top of it.
+    """
+    left: list[str] = []
+    deeper = False
+    for child in tag.tags:
+        if child.is_container:
+            deeper = True
+        elif deeper:
+            left.append(child.name)
+        left.extend(out_of_order(child))
+    return left
+
+
 # ---------------------------------------------------------------------------
 # the change itself
 # ---------------------------------------------------------------------------
@@ -895,7 +913,7 @@ def test_the_containers_stay_in_the_order_they_were_found():
 
 
 def test_a_container_travels_whole_and_its_subtags_are_left_as_they_are():
-    """The kuid and username inside a container are not the two at the top."""
+    """The names pinned to the top of a file are not pinned inside a container."""
     text = (
         'kind "vnd.trainsim.asset"\n'
         'kuid <kuid:2:100>\n'
@@ -1057,6 +1075,229 @@ def test_an_empty_file_is_left_alone():
     assert result.rewrites == ()
     assert result.status == "Nothing was reordered"
     assert not result.warning
+
+
+# ---------------------------------------------------------------------------
+# the order inside a container
+# ---------------------------------------------------------------------------
+def test_the_values_of_a_container_come_before_the_containers_inside_it():
+    text = (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        '    mesh "ind.im"\n'
+        "    auto-create 1\n"
+        "  }\n"
+        "}\n"
+    )
+    assert ordered(text) == (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "ind.im"\n'
+        "    auto-create 1\n"
+        "\n"
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_the_order_is_put_right_at_every_depth_of_the_file():
+    text = (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        "    effects\n"
+        "    {\n"
+        "      effect-mesh\n"
+        "      {\n"
+        '        mesh "e.im"\n'
+        "      }\n"
+        '      effect "a"\n'
+        "    }\n"
+        '    mesh "ind.im"\n'
+        "  }\n"
+        "}\n"
+    )
+    assert ordered(text) == (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "ind.im"\n'
+        "\n"
+        "    effects\n"
+        "    {\n"
+        '      effect "a"\n'
+        "\n"
+        "      effect-mesh\n"
+        "      {\n"
+        '        mesh "e.im"\n'
+        "      }\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_a_container_written_on_one_line_is_a_value_down_there_as_well():
+    text = (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        "    kofi { a 1 }\n"
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        '    mesh "ind.im"\n'
+        "  }\n"
+        "}\n"
+    )
+    assert ordered(text) == (
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        "    kofi { a 1 }\n"
+        '    mesh "ind.im"\n'
+        "\n"
+        "    effects\n"
+        "    {\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_the_inside_of_a_container_is_put_right_in_the_stretch_moving_it():
+    """A container that moves takes its new inside along in the same edit."""
+    text = (
+        'kind "vnd.trainsim.asset"\n'
+        "table\n"
+        "{\n"
+        "  sub\n"
+        "  {\n"
+        "  }\n"
+        "  value 1\n"
+        "}\n"
+        'kuid <kuid:2:100>\n'
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert [text[one.start : one.end] for one in result.rewrites] == [text[:-1]]
+    assert result.text == (
+        'kuid <kuid:2:100>\n'
+        'kind "vnd.trainsim.asset"\n'
+        "\n"
+        "table\n"
+        "{\n"
+        "  value 1\n"
+        "\n"
+        "  sub\n"
+        "  {\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_a_container_that_stands_still_gets_a_stretch_of_its_own():
+    """Two short edits rather than one long one covering the whole file."""
+    text = (
+        "table\n"
+        "{\n"
+        "  sub\n"
+        "  {\n"
+        "    x 1\n"
+        "  }\n"
+        "  value 1\n"
+        "}\n"
+        "obsolete-table\n"
+        "{\n}\n"
+        "kuid-table\n"
+        "{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert [text[one.start : one.end] for one in result.rewrites] == [
+        # the two containers that change place at the top of the file
+        "obsolete-table\n{\n}\nkuid-table\n{\n}",
+        # and the tags inside the container that stands still
+        "  sub\n  {\n    x 1\n  }\n  value 1",
+        # the blank line between them, where nothing moved at all
+        "",
+    ]
+    assert result.text == (
+        "table\n"
+        "{\n"
+        "  value 1\n"
+        "\n"
+        "  sub\n"
+        "  {\n"
+        "    x 1\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "kuid-table\n"
+        "{\n}\n"
+        "\n"
+        "obsolete-table\n"
+        "{\n}\n"
+    )
+
+
+def test_the_tags_moved_inside_a_container_are_named_as_well():
+    text = (
+        "table\n"
+        "{\n"
+        "  sub\n"
+        "  {\n"
+        "  }\n"
+        "  value 1\n"
+        "}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.status == "Reordered 2 tags, added 1 blank line"
+    assert result.summary() == (
+        "Reordered 2 tags, added 1 blank line:\n"
+        "\n"
+        "  value moved from line 6 to line 3\n"
+        "  sub moved from line 3 to line 5\n"
+        "  a blank line went above the sub on line 5"
+    )
+
+
+def test_a_container_already_holding_its_values_first_is_left_as_it_is():
+    text = (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "\n"
+        "table\n"
+        "{\n"
+        "  value 1\n"
+        "\n"
+        "  sub\n"
+        "  {\n"
+        "  }\n"
+        "}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.moves == ()
+    assert result.gaps == ()
+    assert result.status == "Nothing was reordered"
 
 
 # ---------------------------------------------------------------------------
@@ -1406,6 +1647,14 @@ def test_the_summary_says_which_containers_got_a_blank_line():
 # ---------------------------------------------------------------------------
 # the real config files
 # ---------------------------------------------------------------------------
+def test_the_values_of_a_real_asset_come_before_its_sub_containers_at_every_depth():
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        text = read_text_file(SAMPLES / name)
+        result = tweaks.reorder_tags(text)
+
+        assert not out_of_order(parse_text(result.text)), name
+
+
 def test_reordering_loses_no_tag_and_needs_no_second_press():
     for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
         text = read_text_file(SAMPLES / name)

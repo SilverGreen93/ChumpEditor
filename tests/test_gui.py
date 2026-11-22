@@ -1065,6 +1065,49 @@ TIDY = "".join(
     )
 )
 
+# a container holding a container as well as a value, with both of the two
+# containers at the top of the file written the wrong way round
+DEEPLY_UNTIDY = "".join(
+    line + "\n"
+    for line in (
+        "table",
+        "{",
+        "  sub",
+        "  {",
+        "  }",
+        "  value 1",
+        "}",
+        "obsolete-table",
+        "{",
+        "}",
+        "kuid-table",
+        "{",
+        "}",
+    )
+)
+
+DEEPLY_TIDY = "".join(
+    line + "\n"
+    for line in (
+        "table",
+        "{",
+        "  value 1",
+        "",
+        "  sub",
+        "  {",
+        "  }",
+        "}",
+        "",
+        "kuid-table",
+        "{",
+        "}",
+        "",
+        "obsolete-table",
+        "{",
+        "}",
+    )
+)
+
 
 def test_reordering_puts_the_kuid_and_the_username_at_the_top(window, dialogs):
     """The containers come after the tags holding one value, whole and as they were."""
@@ -1103,6 +1146,18 @@ def test_one_press_of_undo_takes_the_whole_reorder_back(window, dialogs):
     assert window.editor.toPlainText() == UNTIDY
     click(window, "Edit", "Redo")
     assert window.editor.toPlainText() == TIDY
+
+
+def test_the_order_inside_a_container_goes_back_in_one_press_too(window, dialogs):
+    """Several short edits, in a container and at the top, are one change."""
+    window.editor.setPlainText(DEEPLY_UNTIDY)
+    click(window, "Tweaks", "Reorder tags")
+
+    assert window.editor.toPlainText() == DEEPLY_TIDY
+    assert window._message == "Reordered 4 tags, added 3 blank lines"
+
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == DEEPLY_UNTIDY
 
 
 def test_a_file_already_in_order_is_left_as_it_is(window, dialogs):
