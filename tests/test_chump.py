@@ -858,7 +858,7 @@ def test_a_value_tag_and_a_brace_do_not_mix():
 
 
 # --------------------------------------------------------------------------
-# the check a write is guarded by: quotes and angle brackets
+# the check a write is guarded by: quotes, angle brackets and repeated names
 # --------------------------------------------------------------------------
 def test_check_text_hands_back_the_tags_the_parser_makes():
     assert check_text('k 1\ns "two"\n') == parse_text('k 1\ns "two"\n')
@@ -937,6 +937,61 @@ def test_a_missing_closing_quote_that_eats_the_next_tag_is_reported():
 def test_a_quote_mark_in_a_tag_name_is_reported():
     with pytest.raises(ChumpError, match=r"line 2: tag name 'kind\"' has a quote mark in it"):
         check_text('k 1\nkind" 2\n')
+
+
+def test_a_tag_written_twice_at_the_top_of_the_file_is_reported():
+    with pytest.raises(ChumpError, match=r"line 2: tag 'username' is written twice at the "
+                                         "same level, the first one on line 1"):
+        check_text('username "abc"\nusername "bcdf"\n')
+
+
+def test_a_tag_written_twice_inside_a_container_is_reported():
+    with pytest.raises(ChumpError, match=r"line 4: tag 'distance' is written twice at the "
+                                         "same level, the first one on line 3"):
+        check_text("c\n{\ndistance 2\ndistance 3\n}\n")
+
+
+def test_two_containers_of_one_name_at_the_same_level_are_reported():
+    with pytest.raises(ChumpError, match=r"line 8: tag 'kuid-table' is written twice at the "
+                                         "same level, the first one on line 3"):
+        check_text(
+            'username "test"\n'
+            "\n"
+            "kuid-table\n{\n0 <kuid:12:12>\n}\n"
+            "\n"
+            "kuid-table\n{\n1 <kuid:23:23>\n}\n"
+        )
+
+
+def test_a_container_and_a_tag_of_the_same_name_written_beside_each_other_are_reported():
+    with pytest.raises(ChumpError, match=r"line 4: tag 'mesh-table' is written twice"):
+        check_text("mesh-table\n{\n}\nmesh-table 3\n")
+
+
+def test_a_tag_written_again_inside_a_container_is_a_different_tag():
+    # the container the second one is written in is a different container, so
+    # the two of them say nothing contradictory about one name
+    check_text('username "abc"\n\nc\n{\nusername "bcdf"\n}\n')
+
+
+def test_a_name_repeated_down_through_the_levels_is_fine():
+    check_text("kuid-table\n{\nkuid-table\n{\n}\n}\n")
+
+
+def test_the_same_name_in_two_different_containers_is_fine():
+    check_text("a\n{\nd 1\n}\n\nb\n{\nd 2\n}\n")
+
+
+def test_a_broken_brace_is_blamed_before_a_name_written_twice():
+    # the stray '}' is the real problem, and a repeat that only the broken
+    # layout would seem to create has to wait behind it
+    with pytest.raises(ChumpError, match=r"line 5: '\}' with no container open"):
+        check_text("a\n{\nx 1\n}\n}\nx 2\n")
+
+
+def test_a_brace_with_no_name_before_it_is_blamed_before_a_name_written_twice():
+    with pytest.raises(ChumpError, match=r"line 1: '\{' without a tag name before it"):
+        check_text("{\nx 1\nx 2\n}\n")
 
 
 def test_the_sample_text_files_pass_the_check():

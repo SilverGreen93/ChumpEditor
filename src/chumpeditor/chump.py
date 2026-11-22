@@ -756,9 +756,9 @@ def check_text(text: str) -> Tag:
 
     ``parse_text`` understands the layout of a chump text file and stops at a
     container whose ``{`` / ``}`` pair is missing one half.  What it cannot see
-    is a quote or a ``<`` / ``>`` pair broken by hand, because a broken pair
-    looks like ordinary text.  So each line is looked at first, and a quote mark
-    has to have its partner:
+    is a quote or a ``<`` / ``>`` pair broken by hand, or one name written twice
+    in the same container, because all of that looks like ordinary text.  So each
+    line is looked at first:
 
     * a quoted value whose quote marks do not come in twos is refused.  The
       reader takes the value from the first quote to the last one, so a loose
@@ -775,7 +775,14 @@ def check_text(text: str) -> Tag:
     * an angle bracket with no partner in a value that is not wrapped in quotes
       is refused, because it leaves a kuid half written - ``<kuid:1:2`` and
       ``kuid:1:2>`` both read back as text without the brackets that make a
-      kuid a kuid.
+      kuid a kuid;
+    * a name has to be written once in one container, so a second ``username``
+      written beside the first, or a second ``kuid-table``, is refused.  A
+      container holds one tag per name, so two of one name say contradictory
+      things and the reader has no way to choose between them.  A name written
+      again further down is a different tag, since it belongs to another
+      container, and names are compared exactly, which is how the binary form
+      stores them.
 
     Quotes that do come in twos are taken at face value, however odd they look:
     a value holding ``say ""hi""`` is a string and stays one, and a bracket in
@@ -783,19 +790,42 @@ def check_text(text: str) -> Tag:
     at all is left to the parser, which says so with the line the value started
     on.  The walk follows the same lines as ``_parse_lines`` and reads each line
     before the parser turns it into tags, which is what lets it name the line at
-    fault.
+    fault, and it keeps one set of names per open container, which is what lets
+    it name the line the first copy of a repeated name was written on.
     """
     lines = text.splitlines()
     index, size = 0, len(lines)
+    # the containers standing open, each with the names written in it and the
+    # line each name was written on
+    written: list[dict[str, int]] = [{}]
     while index < size:
         line = lines[index].strip()
         index += 1
         if not line:
             continue
+        if line == "}":
+            # which container this closes is the parser's business; here the
+            # brace only closes the set of names collected for it.  A brace with
+            # nothing open under it is a file whose layout is broken, and the
+            # parser blames that by line, so nothing further is read here.
+            if len(written) == 1:
+                break
+            written.pop()
+            continue
+        if line == "{":
+            # a brace with no tag name before it, which the parser refuses too
+            break
         name, rest = _split_name(line)
         if '"' in name:
             raise ChumpError(f"line {index}: tag name '{name}' has a quote mark in it")
+        _check_repeated(name, index, written[-1])
         if not rest:
+            if index < size and lines[index].strip() == "{":
+                index += 1  # the brace this name opens, its body comes after
+                written.append({})
+            continue
+        if rest == "{":
+            written.append({})  # the brace written on the name's own line
             continue
         if rest.startswith('"'):
             if len(rest) > 1 and rest.endswith('"'):  # a one line string
@@ -821,6 +851,24 @@ def check_text(text: str) -> Tag:
             )
         _check_brackets(name, index, rest)
     return parse_text(text)
+
+
+def _check_repeated(name: str, index: int, names: dict[str, int]) -> None:
+    """Complain about a name written twice in the container being read.
+
+    ``names`` is the one set for that container: it holds every name written at
+    that level and the line each one first appeared on.  A container holds one
+    tag per name, so a second copy contradicts the first, and the line the
+    first one stands on is what makes the complaint findable in the text.
+    """
+    first = names.get(name)
+    if first is None:
+        names[name] = index
+        return
+    raise ChumpError(
+        f"line {index}: tag '{name}' is written twice at the same level, "
+        f"the first one on line {first}"
+    )
 
 
 def _check_pairs(name: str, index: int, marks: int) -> None:

@@ -113,14 +113,37 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 
 Neither Save nor Export writes a file the format would refuse. The text on screen
 is read and checked first: a container whose `{` / `}` pair is missing a half,
-quote marks that do not come in twos, a quote mark in a tag name, and half a kuid
-(`<kuid:1:2` or `kuid:1:2>`) are named with their line number - counted the same
-way as the numbers down the side of the text - instead of going to disk. The
+quote marks that do not come in twos, a quote mark in a tag name, half a kuid
+(`<kuid:1:2` or `kuid:1:2>`), and one name written twice in the same container are
+named with their line number - counted the same way as the numbers down the side
+of the text - instead of going to disk. The
 quote pairing is the part that reading alone cannot catch: a
 `kind "interior` that lost its closing quote runs on through the tags after it and
 stops at the quote meant to open the next value, so the file still reads - it just
 reads as one long value instead of several. Inside a quoted value the marks still
 have to pair up; a bracket in a license string is only prose.
+
+A name counts against the container it is written in, and a container holds one
+tag per name, so two of one name contradict each other and the reader has no way
+to choose. This is refused, with the line of the first copy named as well:
+
+```
+username                              "abc"
+username                              "bcdf"
+```
+
+so is a second container of one name written beside the first, which is how a file
+ends up with two `kuid-table`s. The same name one level down is a different tag,
+since it belongs to another container, and stays:
+
+```
+username                              "abc"
+
+container
+{
+  username                            "bcdf"
+}
+```
 
 ### Tweaks
 
@@ -402,7 +425,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         504 tests
+tests/                         517 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from chumpeditor import tweaks
-from chumpeditor.chump import load_chump, parse_text, read_text_file, render_text
+from chumpeditor.chump import check_text, load_chump, parse_text, read_text_file, render_text
 
 SAMPLES = Path(__file__).parent / "test_files"
 
@@ -1730,6 +1730,21 @@ def test_a_decoded_file_needs_no_blank_line_and_no_second_press():
         assert not the_gaps_left(once.text), name
         assert twice.text == once.text, name
         assert twice.status == "Nothing was reordered", name
+
+
+def test_no_tweak_writes_text_the_save_would_refuse():
+    # adding a mesh-table and folding a run of numbered tags are exactly where a
+    # second tag of one name could come from, and both tweaks turn that down;
+    # nothing they hand over may fail the check a write is guarded by
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        text = read_text_file(SAMPLES / name)
+        for tweak in (
+            tweaks.convert_obsolete_lists,
+            tweaks.remove_language_tags,
+            tweaks.convert_asset_filename_to_mesh_table,
+            tweaks.reorder_tags,
+        ):
+            check_text(tweak(text).text)
 
 
 def test_a_real_asset_ends_up_in_the_asked_for_order():

@@ -10,8 +10,8 @@ tested on their own:
 * exporting writes the editor's text as a text file laid out the way the
   original expander wrote one: UTF-8 with a BOM, CRLF line endings;
 * both of them start with ``check_text``, so text the format would misread -
-  half a container, a loose quote mark, half a kuid - is reported instead of
-  written.
+  half a container, a loose quote mark, half a kuid, one name written twice in
+  the same container - is reported instead of written.
 """
 
 from __future__ import annotations
@@ -102,8 +102,8 @@ def save_chump(text: str, path: str | Path) -> Path:
     not keep them: a quoted value spanning lines holds whichever ending the
     format uses, and the format uses CRLF, so that is what a value gets back.
     Nothing that fails ``check_text`` is written, so a missing brace, a quote
-    with no partner or half a kuid is a ChumpError naming the line instead of
-    a file Trainz would refuse to read.
+    with no partner, half a kuid or a name written twice in one container is a
+    ChumpError naming the line instead of a file Trainz would refuse to read.
     """
     return dump_chump(check_text(as_file_text(text)), path)
 

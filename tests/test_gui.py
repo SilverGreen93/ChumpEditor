@@ -1530,6 +1530,21 @@ def test_a_quote_mark_with_no_partner_in_a_real_file_is_said(window, tmp_path, d
     assert source.read_bytes() == before
 
 
+def test_a_name_written_twice_in_one_container_is_said_and_nothing_is_written(
+    window, picks, tmp_path, dialogs
+):
+    """Two tags of one name contradict each other, so Trainz gets neither."""
+    source = copy("config1.chump", tmp_path)
+    before = source.read_bytes()
+    window.open_path(source)
+    replace(window, 'username "abc"\nusername "bcdf"\n')
+
+    assert window.save() is None
+    assert picks.asked == []  # the check comes first, so no save dialog was opened
+    assert source.read_bytes() == before
+    assert "line 2: tag 'username' is written twice at the same level" in dialogs[-1][2]
+
+
 def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path):
     source = copy("config1.chump", tmp_path)
     window.open_path(source)

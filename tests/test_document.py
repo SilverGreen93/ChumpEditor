@@ -150,6 +150,23 @@ def test_exporting_a_broken_bracket_pair_is_refused(tmp_path):
     assert not (tmp_path / "brackets.txt").exists()
 
 
+def test_a_name_written_twice_in_one_container_is_refused(tmp_path):
+    """Two tags of one name contradict each other, so neither write accepts them."""
+    text = 'username "abc"\nusername "bcdf"\nc\n{\ndistance 2\n}\n'
+    for write, name in ((save_chump, "twice.chump"), (save_text, "twice.txt")):
+        with pytest.raises(ChumpError) as exc:
+            write(text, tmp_path / name)
+        assert "line 2: tag 'username' is written twice at the same level" in str(exc.value)
+        assert not (tmp_path / name).exists()
+
+
+def test_a_name_written_once_per_container_is_written(tmp_path):
+    """The same name one level down belongs to another container and is fine."""
+    text = 'username "abc"\nc\n{\nusername "bcdf"\n}\n'
+    assert save_chump(text, tmp_path / "nested.chump").exists()
+    assert save_text(text, tmp_path / "nested.txt").exists()
+
+
 def test_a_lost_closing_quote_that_eats_the_next_tag_is_refused(tmp_path):
     """The value runs on to the quote of a later tag; both writes say so."""
     text = read_document(copy("config2.txt", tmp_path)).replace('"interior"', '"interior')
