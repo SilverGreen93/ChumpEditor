@@ -590,11 +590,12 @@ OBSOLETE = "".join(
 )
 
 
-def test_the_tweaks_menu_holds_the_three_tidy_ups(window):
+def test_the_tweaks_menu_holds_the_four_tidy_ups(window):
     assert labels(menu_of(window, "Tweaks")) == [
         "Convert obsolete lists",
         "Convert asset-filename to mesh-table",
         "Remove language tags",
+        "Reorder tags",
     ]
 
 
@@ -884,6 +885,134 @@ def test_the_obsolete_sample_gains_its_mesh_table_in_the_window(window, dialogs,
     assert names.count("mesh-table") == 1
     table = next(tag for tag in tags if tag.name == "mesh-table")
     assert [child.name for child in table.tags] == ["default"]
+
+
+# ---------------------------------------------------------------------------
+# reordering the tags
+# ---------------------------------------------------------------------------
+UNTIDY = "".join(
+    line + "\n"
+    for line in (
+        lined("kind", '"interior"'),
+        lined("kuid", "<kuid:2:100>"),
+        "mesh-table",
+        "{",
+        lined("  mesh", '"a.im"'),
+        "}",
+        lined("username", '"a name"'),
+        "kuid-table",
+        "{",
+        "}",
+    )
+)
+
+TIDY = "".join(
+    line + "\n"
+    for line in (
+        lined("kuid", "<kuid:2:100>"),
+        lined("username", '"a name"'),
+        lined("kind", '"interior"'),
+        "mesh-table",
+        "{",
+        lined("  mesh", '"a.im"'),
+        "}",
+        "kuid-table",
+        "{",
+        "}",
+    )
+)
+
+
+def test_reordering_puts_the_kuid_and_the_username_at_the_top(window, dialogs):
+    """The containers come after the tags holding one value, whole and as they were."""
+    window.editor.setPlainText(UNTIDY)
+    click(window, "Tweaks", "Reorder tags")
+
+    assert window.editor.toPlainText() == TIDY
+
+
+def test_reordering_names_the_tags_that_moved(window, dialogs):
+    """Which tags moved and to which line, in a box and in the status bar."""
+    window.editor.setPlainText(UNTIDY)
+    click(window, "Tweaks", "Reorder tags")
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("info", "Reorder tags")
+    assert "Reordered 4 tags" in text
+    for line in (
+        "kuid moved from line 2 to line 1",
+        "username moved from line 7 to line 2",
+        "kind moved from line 1 to line 3",
+        "mesh-table moved from line 3 to line 4",
+    ):
+        assert line in text
+    assert window._message == "Reordered 4 tags"
+
+
+def test_one_press_of_undo_takes_the_whole_reorder_back(window, dialogs):
+    """Six tags that moved together go back together, not one press each."""
+    window.editor.setPlainText(UNTIDY)
+    click(window, "Tweaks", "Reorder tags")
+    assert window.editor.toPlainText() == TIDY
+    click(window, "Edit", "Undo")
+    assert window.editor.toPlainText() == UNTIDY
+    click(window, "Edit", "Redo")
+    assert window.editor.toPlainText() == TIDY
+
+
+def test_a_file_already_in_order_is_left_as_it_is(window, dialogs):
+    """Pressing the item again is not a change, and it is not a warning either."""
+    window.editor.setPlainText(TIDY)
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Reorder tags")
+
+    assert window.editor.toPlainText() == TIDY
+    assert not window.editor.document().isModified()
+    assert not item(window, "Edit", "Undo").isEnabled()
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("info", "Reorder tags")
+    assert text.startswith("Nothing was reordered")
+    assert window._message == "Nothing was reordered"
+
+
+def test_a_file_whose_tags_cannot_be_cut_out_is_warned_about(window, dialogs):
+    """A container left open means no safe line to cut on, so nothing moves."""
+    broken = 'kuid <kuid:2:100>\nusername "a name"\nmesh-table\n{\n  default\n  {\n'
+    window.editor.setPlainText(broken)
+    window.editor.document().setModified(False)
+    click(window, "Tweaks", "Reorder tags")
+
+    assert window.editor.toPlainText() == broken
+    assert not window.editor.document().isModified()
+    assert not item(window, "Edit", "Undo").isEnabled()
+
+    kind, title, text = dialogs[-1]
+    assert (kind, title) == ("warn", "Reorder tags")
+    assert text.startswith("The tags cannot be reordered")
+    assert "opens a container that is never closed" in text
+    assert window._message == "The tags cannot be reordered"
+
+
+def test_a_real_config_file_is_reordered_in_the_window(window, dialogs, tmp_path):
+    """A real asset, reordered and read back as a tree by the codec."""
+    source = copy("config2.txt", tmp_path)
+    assert window.open_file(source)
+    before = window.editor.toPlainText()
+
+    click(window, "Tweaks", "Reorder tags")
+
+    after = window.editor.toPlainText()
+    assert len(after.split("\n")) == len(before.split("\n"))
+    assert dialogs[-1][2].startswith("Reordered ")
+
+    tags = parse_text(after).tags
+    assert [tag.name for tag in tags[:2]] == ["kuid", "username"]
+    assert [tag.name for tag in tags[-2:]] == ["kuid-table", "obsolete-table"]
+    # nothing was lost or changed on the way round, only moved
+    assert sorted(tag.name for tag in tags) == sorted(
+        tag.name for tag in parse_text(before).tags
+    )
 
 
 # ---------------------------------------------------------------------------

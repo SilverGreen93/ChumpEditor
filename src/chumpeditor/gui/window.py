@@ -198,10 +198,16 @@ class ChumpWindow(QMainWindow):
             tweaks.convert_asset_filename_to_mesh_table,
         )
 
+    def reorder_tags(self) -> None:
+        """Tweaks > Reorder tags: kuid and username first, the containers last."""
+        self._tweak("Reorder tags", tweaks.reorder_tags)
+
     def _tweak(
         self,
         title: str,
-        tidy: Callable[[str], tweaks.Tweaks | tweaks.Sweep | tweaks.MeshTables],
+        tidy: Callable[
+            [str], tweaks.Tweaks | tweaks.Sweep | tweaks.MeshTables | tweaks.Order
+        ],
     ) -> None:
         """One tidy-up over the text on screen, and then an account of it.
 

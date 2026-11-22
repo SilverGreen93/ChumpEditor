@@ -1,4 +1,4 @@
-"""Two tidy-ups a person asks for, done to the text and nothing else.
+"""Four tidy-ups a person asks for, done to the text and nothing else.
 
 The first is the numbered tags Trainz has moved on from.  Trainz used to write
 a list as a run of tags with a number on the end - ``category-era-0``,
@@ -12,8 +12,8 @@ whose name ends in a dash and two letters comes out with its value, whatever
 that value is: one on the line, one running over several lines, or a whole
 container.  The plain ``description`` stays.
 
-Neither tidy-up ever decides on its own that a file needs fixing, and each
-leaves a tag alone the moment it is not sure about it.
+None of them ever decides on its own that a file needs fixing, and each leaves a
+tag alone the moment it is not sure about it.
 
 A numbered tag is changed only when
 
@@ -67,6 +67,21 @@ name of the file to load carrying the ``.im`` the tag left off::
 A file that already has a mesh-table is left exactly as it is and the person is
 warned, since a second one would leave Trainz choosing between two meshes.
 
+The fourth tidy-up puts the tags in the order a chump file is usually written
+in::
+
+    kuid and username                 first, whatever was written above them
+    the tags that hold one value      next, in the order they were found
+    the containers                    after them, in the order they were found
+    kuid-table, obsolete-table        last of all, when the file has them
+
+A container travels whole, with its subtags exactly as they stood, and nothing
+inside one is looked at.  The blank lines under a tag travel with it so the gaps
+keep their shape, and the blank lines at the end of the file stay at the end.
+A tag whose value or container is never closed, and a line at the top that is
+not a tag at all, mean the tags cannot be told apart from each other, and then
+nothing at all is moved and the person is warned.
+
 Everything here is free of Qt and answers in character positions within the
 text, so the rules can be read and tested without a window and the editor can
 apply the changes as edits a person can undo in one go.
@@ -83,6 +98,8 @@ __all__ = [
     "Conversion",
     "MeshTable",
     "MeshTables",
+    "Move",
+    "Order",
     "Removal",
     "Rewrite",
     "Sweep",
@@ -90,6 +107,7 @@ __all__ = [
     "convert_asset_filename_to_mesh_table",
     "convert_obsolete_lists",
     "remove_language_tags",
+    "reorder_tags",
 ]
 
 #: a tag with a number on the end and a quoted value of its own after the
@@ -125,7 +143,8 @@ class Rewrite:
     #: the character the stretch starts at, and the one it stops before
     start: int
     end: int
-    #: what replaces it, which never holds a line ending of its own
+    #: what replaces it, which is one line for a tag that stays a tag and
+    #: several for a tag that becomes a block of them
     text: str
 
 
@@ -924,3 +943,284 @@ def _the_gap(indent: str, name: str) -> int:
 def _the_indent(line: str) -> str:
     """Whatever a line starts with before its tag name."""
     return line[: len(line) - len(line.lstrip())]
+
+
+# --------------------------------------------------------------------------- #
+# Reorder the top level tags
+# --------------------------------------------------------------------------- #
+
+#: the tags that always come first, in this order: the kuid is how Trainz knows
+#: which asset the file is, and the name under it is what the person reads
+_FIRST_TAGS = ("kuid", "username")
+
+#: the containers that always come after every other container, in this order,
+#: because they are the ones Trainz fills in for itself
+_LAST_CONTAINERS = ("kuid-table", "obsolete-table")
+
+
+@dataclass(frozen=True)
+class Move:
+    """One top level tag that ended up somewhere other than where it started."""
+
+    #: the tag's own name, spelled as the file spells it
+    tag: str
+    #: the line the tag stood on, and the line it stands on now, both counted
+    #: from 1 the way the codec counts them in what it says about a file
+    from_line: int
+    to_line: int
+
+    def __str__(self) -> str:
+        return f"{self.tag} moved from line {self.from_line} to line {self.to_line}"
+
+
+@dataclass(frozen=True)
+class Order:
+    """What reordering did, and the text after it.
+
+    Shaped the way ``Tweaks``, ``Sweep`` and ``MeshTables`` are - ``text``,
+    ``rewrites``, ``status`` and ``summary`` - so whoever applies one can apply
+    this one without asking.  ``blocked`` is why the tags could not be moved at
+    all, and is empty when they could be.
+    """
+
+    #: the whole text, with the tags in their new places
+    text: str
+    #: the one edit that moves them, empty when nothing needed moving
+    rewrites: tuple[Rewrite, ...] = ()
+    #: the tags that changed place, in the order they stand in the text now
+    moves: tuple[Move, ...] = ()
+    #: why the file was left alone altogether, or '' when it was not
+    blocked: str = ""
+
+    @property
+    def status(self) -> str:
+        """The same news in one line, for a status bar too narrow for the rest."""
+        if self.blocked:
+            return "The tags cannot be reordered"
+        count = len(self.moves)
+        if not count:
+            return "Nothing was reordered"
+        return f"Reordered {count} {'tag' if count == 1 else 'tags'}"
+
+    @property
+    def warning(self) -> bool:
+        """Whether the window shows the answer as a warning rather than as news.
+
+        A file whose tags cannot be told apart is the loud case: the person asked
+        for a change that could not be made without moving something that was not
+        asked for.
+        """
+        return bool(self.blocked)
+
+    def summary(self) -> str:
+        """What happened, in the words the window shows afterwards."""
+        if self.blocked:
+            return f"{self.status}: {self.blocked}"
+        parts: list[str] = []
+        if self.moves:
+            listed = "\n".join(f"  {item}" for item in self.moves)
+            parts.append(f"{self.status}:\n\n{listed}")
+        else:
+            parts.append(
+                "Nothing was reordered.  kuid and username come first, then the "
+                "tags that hold one value, then the containers, and kuid-table "
+                "and obsolete-table after all of them."
+            )
+        return "\n\n".join(parts)
+
+
+def reorder_tags(text: str) -> Order:
+    """Put the top level tags in the order a chump file is written in.
+
+    ``kuid`` and ``username`` go first, then the tags that hold one value in the
+    order they were found, then the containers in the order they were found, and
+    ``kuid-table`` and ``obsolete-table`` after the rest of the containers.  A
+    container travels whole with its subtags as they are, and nothing inside one
+    is looked at.
+
+    Only the stretch between the first tag out of place and the last one is
+    rewritten, so the change stays small enough to follow afterwards, and it goes
+    in as one edit that one press of Undo takes back.
+    """
+    lines, eol = _split(text)
+    blocks, fault = _the_top_level_blocks(lines)
+    if fault:
+        return Order(text=text, blocked=fault)
+
+    wanted = _the_order_they_should_be_in(blocks)
+    edges = _the_part_that_moves(blocks, wanted)
+    if edges is None:
+        return Order(text=text)
+
+    first, last = edges
+    # the same blocks, only between the two edges and in the order they belong
+    moving = wanted[first : last + 1]
+    body = eol.join(
+        line for block in moving for line in lines[block.first : block.last + 1]
+    )
+    rewrite = Rewrite(
+        start=_start_of(lines, eol, blocks[first].first),
+        # the line ending after the last line is left outside the stretch, so
+        # the file keeps the ending it had
+        end=_end_of(lines, eol, blocks[last].last),
+        text=body,
+    )
+    return Order(
+        text=_apply(text, [rewrite]),
+        rewrites=(rewrite,),
+        moves=_the_tags_that_moved(blocks, moving, first),
+    )
+
+
+@dataclass(frozen=True)
+class _Block:
+    """One top level tag and the lines it takes up.
+
+    ``last`` is the ``}`` that closes a container, or the last of the blank lines
+    written under a tag, which travel with it so the gaps keep their shape.  No
+    two blocks of one file share a ``first``, which is what tells apart two tags
+    written exactly alike.
+    """
+
+    tag: str
+    container: bool
+    first: int
+    last: int
+
+
+def _the_top_level_blocks(lines: list[str]) -> tuple[list[_Block], str]:
+    """The top level tags, in the order they are written, or why they can't be told.
+
+    The walk goes from a tag to the line its block ends on and starts again below
+    it, which is how the codec reads a file as well, so a tag inside a container
+    is never mistaken for one at the top and the lines of a value running over
+    several lines are never mistaken for tags.  A value or a container that is
+    never closed, and a line at the top that is not a tag at all, mean there is no
+    safe line to cut on: the whole file is left alone and told about.
+    """
+    # the blank lines at the end of the text are the file's ending rather than
+    # somebody's gap, so they are out of reach of the walk
+    keep = len(lines) - _the_blank_lines_at_the_end(lines)
+    blocks: list[_Block] = []
+    at = 0
+    while at < keep:
+        if not lines[at].strip():
+            at += 1  # the gaps above the first tag stay where they are
+            continue
+        found = _A_NAME.match(lines[at])
+        if found is None:
+            return [], f"line {at + 1} holds {lines[at].strip()!r}, which is not a tag"
+        name = found.group(1)
+        rest = _the_rest_of(lines[at].strip())
+        last, because = _the_tag_takes_up_to(lines, at, rest)
+        if because:
+            return [], f"the {name} on line {at + 1} {because}"
+        end = min(last + _the_blank_lines_below(lines, last + 1, keep), keep - 1)
+        blocks.append(
+            _Block(
+                tag=name,
+                container=_the_tag_opens_a_container(rest, lines, at),
+                first=at,
+                last=end,
+            )
+        )
+        at = end + 1
+    return blocks, ""
+
+
+def _the_blank_lines_at_the_end(lines: list[str]) -> int:
+    """How many lines at the end of the text hold nothing.
+
+    A text ending in a line ending has one more line in it than it has endings,
+    and that last empty line is the ending itself, not a gap to be shuffled.
+    """
+    count = 0
+    while count < len(lines) and not lines[len(lines) - 1 - count].strip():
+        count += 1
+    return count
+
+
+def _the_blank_lines_below(lines: list[str], where: int, keep: int) -> int:
+    """How many blank lines follow this one, short of the end of the text."""
+    count = 0
+    while where + count < keep and not lines[where + count].strip():
+        count += 1
+    return count
+
+
+def _the_tag_opens_a_container(rest: str, lines: list[str], at: int) -> bool:
+    """Whether this tag holds a container rather than a value.
+
+    The brace either sits after the name on the name's own line or waits on the
+    line below, which are the two ways the codec reads a container; and they are
+    the two ways ``_the_tag_takes_up_to`` knows where the block ends, so which
+    tags are containers and how far they reach are decided together.
+    """
+    return rest.startswith("{") or (not rest and _a_brace_is_next(lines, at + 1))
+
+
+def _the_order_they_should_be_in(blocks: list[_Block]) -> list[_Block]:
+    """The same tags in the order the file should hold them.
+
+    Within each of the four groups the tags keep the order the file has them in,
+    which is what makes pressing the tweak a second time do nothing at all.
+    """
+    left = list(blocks)
+    top = _the_first_called(left, _FIRST_TAGS)
+    bottom = _the_first_called(left, _LAST_CONTAINERS)
+    plain = [block for block in left if not block.container]
+    deep = [block for block in left if block.container]
+    return top + plain + deep + bottom
+
+
+def _the_first_called(left: list[_Block], names: tuple[str, ...]) -> list[_Block]:
+    """The first tag with each of these names, in that order, out of the list.
+
+    Taking them out of ``left`` is what keeps a kuid-table from being counted
+    twice, once as an ordinary container and once again as the last one.
+    """
+    chosen: list[_Block] = []
+    for name in names:
+        for block in left:
+            if block.tag.lower() == name:
+                chosen.append(block)
+                left.remove(block)
+                break
+    return chosen
+
+
+def _the_part_that_moves(
+    blocks: list[_Block], wanted: list[_Block]
+) -> tuple[int, int] | None:
+    """The first and last places the tags are not already in, or nothing at all.
+
+    Above the first one and below the last one the file is already in order, so
+    those tags and the lines between them are not touched and the person sees a
+    change no bigger than it has to be.
+    """
+    out_of_place = [
+        at for at, (was, will_be) in enumerate(zip(blocks, wanted))
+        if was is not will_be
+    ]
+    if not out_of_place:
+        return None
+    return out_of_place[0], out_of_place[-1]
+
+
+def _the_tags_that_moved(
+    blocks: list[_Block], moving: list[_Block], first: int
+) -> tuple[Move, ...]:
+    """Which tags changed place, said in the order they stand in the text now.
+
+    The line a tag lands on is counted out of the blocks in front of it, since
+    every block carries exactly the lines it had and nothing is added or taken.
+    """
+    moves: list[Move] = []
+    line = blocks[first].first
+    for offset, block in enumerate(moving):
+        if block is not blocks[first + offset]:
+            moves.append(
+                Move(tag=block.tag, from_line=block.first + 1, to_line=line + 1)
+            )
+        line += block.last - block.first + 1
+    return tuple(moves)

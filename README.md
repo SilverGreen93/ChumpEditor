@@ -97,9 +97,9 @@ looked like.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Save
   chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E), Export txt as..., Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All.
-- **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table and
-  Remove language tags - the tidy-ups of the way older versions of Trainz wrote
-  a file.
+- **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
+  Remove language tags and Reorder tags - the tidy-ups of the way older versions
+  of Trainz wrote a file.
 - **Help**: About - what the program does, the version, the copyright and a link
   to this repository.
 
@@ -214,6 +214,72 @@ proper `-zh` and `-ja`. A tag that is only spelled as if it were one, like
 tag whose value or container is never closed; that is said out loud rather than
 cut into.
 
+#### Reorder tags
+
+A chump file works with its tags in any order, but the ones Trainz writes have a
+shape to them, and an asset edited by hand over ten years tends to lose it. **Tweaks
+> Reorder tags** puts the top level tags back in that shape:
+
+- `kuid` and then `username`, whatever was written above them;
+- every tag that holds one value, in the order they were found;
+- every container, in the order they were found, with its subtags exactly as they
+  stood;
+- `kuid-table` and `obsolete-table` after all the other containers, when the file
+  has them.
+
+```
+kind                                    "interior"
+mesh-table
+{
+  default
+  {
+    mesh                                "interior.im"
+  }
+}
+kuid                                    <kuid:79373:50023>
+username                                "CFR interior"
+obsolete-table
+{
+}
+kuid-table
+{
+}
+```
+
+becomes
+
+```
+kuid                                    <kuid:79373:50023>
+username                                "CFR interior"
+kind                                    "interior"
+mesh-table
+{
+  default
+  {
+    mesh                                "interior.im"
+  }
+}
+kuid-table
+{
+}
+obsolete-table
+{
+}
+```
+
+Nothing inside a container is looked at, and a container moves as one block, so a
+subtag cannot be split from the braces holding it. The blank lines under a tag
+travel with it, and the blank lines at the end of the file stay at the end, so the
+file keeps the shape it had. Only the stretch between the first tag out of place
+and the last one is rewritten - everything already where it belongs is not touched,
+which is why pressing the item a second time says *Nothing was reordered*. One
+press of Undo takes the whole move back.
+
+The message names every tag that moved and the line it moved to. A tag whose value
+or container is never closed, and a line at the top that is not a tag at all, mean
+there is no safe line to cut the file on: nothing moves at all, and the message is
+a warning naming the line.
+
 ### Colour themes
 
 What gets coloured is a small JSON file, not something written into the program:
@@ -285,7 +351,7 @@ src/chumpeditor/chump.py       the codec: parse/pack binary, parse/pack text, co
 src/chumpeditor/document.py    opening, saving, exporting: the rules the editor follows
 src/chumpeditor/theme.py       the colour themes: the JSON format, reading and writing one
 src/chumpeditor/scan.py        which rule of a theme owns which stretch of a line
-src/chumpeditor/tweaks.py      the three tidy-ups of the way older files read: Tweaks does this
+src/chumpeditor/tweaks.py      the four tidy-ups of the way older files read: Tweaks does this
 src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
@@ -293,7 +359,7 @@ src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, abo
                                highlighter.py, drops.py, resources.py
 chumpeditor_cli_entry.py       entry points used by PyInstaller
 chumpeditor_gui_entry.py
-tests/                         433 tests
+tests/                         466 tests
 tests/test_files/              sample .chump/.txt pairs
 build.py                       PyInstaller exes, dmg, deb, pkg.tar.zst
 installer/                     WiX v5 per-user MSI (Windows)

@@ -85,6 +85,7 @@ def _tweaks(menu, window: QMainWindow) -> None:
         window.convert_asset_filename_to_mesh_table,
     )
     _add(menu, "&Remove language tags", None, window.remove_language_tags)
+    _add(menu, "&Reorder tags", None, window.reorder_tags)
 
 
 def _help(menu, window: QMainWindow) -> None:

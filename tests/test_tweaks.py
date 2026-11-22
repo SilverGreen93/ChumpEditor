@@ -45,6 +45,34 @@ def mesh_said(text: str) -> str:
     return tweaks.convert_asset_filename_to_mesh_table(text).summary()
 
 
+def ordered(text: str) -> str:
+    """The text a reorder produces."""
+    return tweaks.reorder_tags(text).text
+
+
+def order_said(text: str) -> str:
+    """Everything the reorder had to say, in one string to search."""
+    return tweaks.reorder_tags(text).summary()
+
+
+def held(root) -> dict:
+    """The top level tags of a parsed file, gathered by name.
+
+    A reorder moves tags about without changing any of them, so this is what
+    the file is checked against before and after: every tag of every name, with
+    everything under it, in the order the file has them.
+    """
+    tags: dict = {}
+    for tag in root.tags:
+        tags.setdefault(tag.name, []).append(the_shape_of(tag))
+    return tags
+
+
+def the_shape_of(tag):
+    """A tag and everything under it, as plain values that can be compared."""
+    return (tag.name, tag.value, tuple(the_shape_of(child) for child in tag.tags))
+
+
 # ---------------------------------------------------------------------------
 # the change itself
 # ---------------------------------------------------------------------------
@@ -785,3 +813,381 @@ def test_the_asset_filename_of_a_real_asset():
     assert default.get("auto-create").value == 1
     assert after.get("username").value == before.get("username").value
     assert after.get("kuid-table").tags == before.get("kuid-table").tags
+
+
+# ---------------------------------------------------------------------------
+# putting the tags in order
+# ---------------------------------------------------------------------------
+def test_the_kuid_and_the_username_come_first():
+    text = 'kind "interior"\nkuid <kuid:2:100>\nauthor "nobody"\nusername "a name"\n'
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'username "a name"\n'
+        'kind "interior"\n'
+        'author "nobody"\n'
+    )
+
+
+def test_the_kuid_comes_first_even_when_the_username_was_written_first():
+    text = 'username "a name"\nkuid <kuid:2:100>\nkind "interior"\n'
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\nusername "a name"\nkind "interior"\n'
+    )
+
+
+def test_a_kuid_the_file_never_had_is_not_invented():
+    text = 'kind "interior"\nauthor "nobody"\nusername "a name"\n'
+    assert ordered(text) == (
+        'username "a name"\nkind "interior"\nauthor "nobody"\n'
+    )
+
+
+def test_the_tags_holding_one_value_stay_in_the_order_they_were_found():
+    text = 'kuid <kuid:2:100>\nauthor "nobody"\nkind "interior"\nusername "n"\n'
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\nusername "n"\nauthor "nobody"\nkind "interior"\n'
+    )
+
+
+def test_the_containers_come_after_every_tag_that_holds_one_value():
+    text = (
+        'kuid <kuid:2:100>\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "a.im"\n'
+        "  }\n"
+        "}\n"
+        'kind "interior"\n'
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "a.im"\n'
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_the_containers_stay_in_the_order_they_were_found():
+    text = (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        "other-table\n{\n  b 2\n}\n"
+        'kind "interior"\n'
+        "one-table\n{\n  a 1\n}\n"
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'kind "interior"\n'
+        "other-table\n{\n  b 2\n}\n"
+        "one-table\n{\n  a 1\n}\n"
+    )
+
+
+def test_a_container_travels_whole_and_its_subtags_are_left_as_they_are():
+    """The kuid and username inside a container are not the two at the top."""
+    text = (
+        'kind "vnd.trainsim.asset"\n'
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        "table\n"
+        "{\n"
+        '  username "inside"\n'
+        "  kuid <kuid:2:1>\n"
+        "}\n"
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'kind "vnd.trainsim.asset"\n'
+        "table\n"
+        "{\n"
+        '  username "inside"\n'
+        "  kuid <kuid:2:1>\n"
+        "}\n"
+    )
+
+
+def test_kuid_table_and_obsolete_table_are_the_last_two_containers():
+    text = (
+        "obsolete-table\n{\n}\n"
+        'kuid <kuid:2:100>\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "a.im"\n'
+        "  }\n"
+        "}\n"
+        'kind "interior"\n'
+        "kuid-table\n{\n}\n"
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        '    mesh "a.im"\n'
+        "  }\n"
+        "}\n"
+        "kuid-table\n{\n}\n"
+        "obsolete-table\n{\n}\n"
+    )
+
+
+def test_the_last_two_containers_stay_last_when_only_one_of_them_is_there():
+    text = (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        "obsolete-table\n{\n  a 1\n}\n"
+        "mesh-table\n{\n  b 2\n}\n"
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        "mesh-table\n{\n  b 2\n}\n"
+        "obsolete-table\n{\n  a 1\n}\n"
+    )
+
+
+def test_kuid_table_alone_comes_after_every_other_container():
+    text = (
+        'kuid <kuid:2:100>\n'
+        "kuid-table\n{\n  a 1\n}\n"
+        "mesh-table\n{\n  b 2\n}\n"
+        'kind "interior"\n'
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'kind "interior"\n'
+        "mesh-table\n{\n  b 2\n}\n"
+        "kuid-table\n{\n  a 1\n}\n"
+    )
+
+
+def test_a_value_running_over_several_lines_travels_with_its_tag():
+    text = (
+        'kind "interior"\n'
+        'license "first line\nstill the same value"\n'
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+    )
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'kind "interior"\n'
+        'license "first line\nstill the same value"\n'
+    )
+
+
+def test_a_line_inside_a_value_running_over_several_lines_is_not_a_tag():
+    """The license string says what may be done with the asset, and is not tags."""
+    text = (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'license "one line\nkind not-a-tag\nthe value ends here"\n'
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.status == "Nothing was reordered"
+    assert not result.warning
+
+
+def test_the_blank_lines_under_a_tag_travel_with_it():
+    text = 'kind "interior"\n\nkuid <kuid:2:100>\nusername "n"\n'
+    assert ordered(text) == (
+        'kuid <kuid:2:100>\nusername "n"\nkind "interior"\n\n'
+    )
+
+
+def test_the_blank_lines_at_the_end_of_the_file_stay_at_the_end():
+    text = 'kind "interior"\nkuid <kuid:2:100>\n\n\n'
+    assert ordered(text) == 'kuid <kuid:2:100>\nkind "interior"\n\n\n'
+
+
+def test_the_gaps_above_the_first_tag_stay_above_the_first_tag():
+    text = '\n\nkind "interior"\nkuid <kuid:2:100>\n'
+    assert ordered(text) == '\n\nkuid <kuid:2:100>\nkind "interior"\n'
+
+
+def test_a_tag_written_with_indentation_keeps_its_indentation():
+    text = '  kind "interior"\n  kuid <kuid:2:100>\n'
+    assert ordered(text) == '  kuid <kuid:2:100>\n  kind "interior"\n'
+
+
+def test_a_text_file_written_with_crlf_comes_back_with_crlf():
+    text = 'kind "interior"\r\nkuid <kuid:2:100>\r\n'
+    assert ordered(text) == 'kuid <kuid:2:100>\r\nkind "interior"\r\n'
+
+
+def test_a_file_with_nothing_after_the_last_tag_has_nothing_to_move():
+    text = "kuid-table\n{\n  a 1\n}\n"
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.status == "Nothing was reordered"
+
+
+def test_an_empty_file_is_left_alone():
+    result = tweaks.reorder_tags("")
+
+    assert result.text == ""
+    assert result.rewrites == ()
+    assert result.status == "Nothing was reordered"
+    assert not result.warning
+
+
+# ---------------------------------------------------------------------------
+# a file whose tags cannot be told apart
+# ---------------------------------------------------------------------------
+def test_a_stray_brace_at_the_top_leaves_everything_alone():
+    text = 'kuid <kuid:2:100>\n}\nusername "n"\n'
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.warning
+    assert result.status == "The tags cannot be reordered"
+    assert "line 2 holds '}', which is not a tag" in order_said(text)
+
+
+def test_a_container_that_is_never_closed_leaves_everything_alone():
+    text = 'kuid <kuid:2:100>\nusername "n"\nmesh-table\n{\n  default\n  {\n'
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.warning
+    assert "the mesh-table on line 3 opens a container that is never closed" in (
+        order_said(text)
+    )
+
+
+def test_a_value_that_is_never_closed_leaves_everything_alone():
+    text = 'kuid <kuid:2:100>\nusername "n"\ndescription "left open\n'
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.warning
+    assert "the description on line 3 holds a quoted value that is never closed" in (
+        order_said(text)
+    )
+
+
+# ---------------------------------------------------------------------------
+# what is said about it
+# ---------------------------------------------------------------------------
+def test_the_summary_says_which_tags_moved_and_to_which_line():
+    text = 'kind "interior"\nkuid <kuid:2:100>\nusername "n"\n'
+    result = tweaks.reorder_tags(text)
+
+    assert result.status == "Reordered 3 tags"
+    assert result.summary() == (
+        "Reordered 3 tags:\n"
+        "\n"
+        "  kuid moved from line 2 to line 1\n"
+        "  username moved from line 3 to line 2\n"
+        "  kind moved from line 1 to line 3"
+    )
+    assert not result.warning
+
+
+def test_the_lines_named_are_the_ones_the_tags_are_on_afterwards():
+    text = 'kind "interior"\nkuid <kuid:2:100>\nusername "n"\n'
+    result = tweaks.reorder_tags(text)
+    lines = result.text.split("\n")
+
+    for move in result.moves:
+        assert lines[move.to_line - 1].startswith(move.tag)
+
+
+def test_only_the_tags_that_move_are_rewritten():
+    """Above the first one out of place the file is already in order."""
+    text = (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'author "nobody"\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        'kind "interior"\n'
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert [text[one.start : one.end] for one in result.rewrites] == [
+        'mesh-table\n{\n  a 1\n}\nkind "interior"'
+    ]
+    assert result.text == (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'author "nobody"\n'
+        'kind "interior"\n'
+        "mesh-table\n{\n  a 1\n}\n"
+    )
+
+
+def test_a_file_already_in_the_asked_for_order_is_left_as_it_is():
+    text = (
+        'kuid <kuid:2:100>\n'
+        'username "n"\n'
+        'kind "interior"\n'
+        "mesh-table\n{\n  a 1\n}\n"
+        "kuid-table\n{\n}\n"
+        "obsolete-table\n{\n}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert result.text == text
+    assert result.rewrites == ()
+    assert result.moves == ()
+    assert not result.warning
+    assert result.status == "Nothing was reordered"
+    assert result.summary().startswith("Nothing was reordered")
+
+
+# ---------------------------------------------------------------------------
+# the real config files
+# ---------------------------------------------------------------------------
+def test_reordering_loses_no_tag_and_needs_no_second_press():
+    for name in ("config1.txt", "config2.txt", "config3.txt", "obsolete_config.txt"):
+        text = read_text_file(SAMPLES / name)
+        once = tweaks.reorder_tags(text)
+        twice = tweaks.reorder_tags(once.text)
+
+        assert not once.warning, name
+        assert held(parse_text(once.text)) == held(parse_text(text)), name
+        assert twice.text == once.text, name
+        assert twice.status == "Nothing was reordered", name
+
+
+def test_a_real_asset_ends_up_in_the_asked_for_order():
+    text = read_text_file(SAMPLES / "config2.txt")
+    result = tweaks.reorder_tags(text)
+    before, after = parse_text(text).tags, parse_text(result.text).tags
+
+    assert [tag.name for tag in after[:2]] == ["kuid", "username"]
+    assert [tag.name for tag in after[-2:]] == ["kuid-table", "obsolete-table"]
+
+    # every tag holding one value comes before every container, in the order the
+    # file had them, with the two that belong at the top moved up
+    values = [tag.name for tag in before if not tag.is_container]
+    assert [tag.name for tag in after if not tag.is_container] == [
+        "kuid",
+        "username",
+    ] + [name for name in values if name not in ("kuid", "username")]
+
+    first_container = next(at for at, tag in enumerate(after) if tag.is_container)
+    assert all(not tag.is_container for tag in after[:first_container])
+    assert all(tag.is_container for tag in after[first_container:])
+    assert not any(tag.is_container for tag in after[:-2])
+
+    # the containers themselves kept what they hold
+    assert held(parse_text(result.text)) == held(parse_text(text))
