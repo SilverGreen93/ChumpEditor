@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from PyQt6.QtGui import QGuiApplication, QKeySequence
+from PyQt6.QtGui import QClipboard, QGuiApplication, QKeySequence
 from PyQt6.QtWidgets import QMainWindow
 
 from .resources import DISPLAY_NAME
@@ -23,10 +23,11 @@ __all__ = ["build_menus"]
 
 
 def build_menus(window: QMainWindow) -> None:
-    """Put File, Edit, Tweaks and Help on the window, wired to its methods."""
+    """Put File, Edit, View, Tweaks and Help on the window, wired to its methods."""
     bar = window.menuBar()
     _file(bar.addMenu("&File"), window)
     _edit(bar.addMenu("&Edit"), window)
+    _view(bar.addMenu("&View"), window)
     _tweaks(bar.addMenu("&Tweaks"), window)
     _help(bar.addMenu("&Help"), window)
 
@@ -99,6 +100,17 @@ def _edit(menu, window: QMainWindow) -> None:
 
     paste.setEnabled(editor.canPaste())
     _clipboard().dataChanged.connect(lambda: paste.setEnabled(editor.canPaste()))
+
+
+def _view(menu, window: QMainWindow) -> None:
+    """What stands beside the text: for now, one tree of the file's containers.
+
+    The item is ticked rather than pressed, because the state it changes is one
+    that goes on being - a panel that stands there until asked not to - and a
+    person looking at the menu should be able to tell which way it stands now.
+    """
+    treeview = _add(menu, "&Treeview", None, window.toggle_treeview)
+    treeview.setCheckable(True)
 
 
 def _tweaks(menu, window: QMainWindow) -> None:

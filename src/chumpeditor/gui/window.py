@@ -12,7 +12,10 @@ whichever was last written becomes the file the window is talking about.
 
 Searching the text belongs to a panel of its own, stood at the bottom of the
 window and brought up from the Edit menu; the window only connects its news to
-the status line.
+the status line.  So does the tree of the file's containers, stood to the left of
+the text and brought up from the View menu: which containers there are and which
+line each is written on is answered by ``outline.py``, and all the window adds is
+where the panel stands and what a chosen row does to the caret.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from pathlib import Path
 from typing import Callable
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QFileDialog, QMainWindow, QMessageBox
 
 from .. import tweaks
@@ -39,6 +43,7 @@ from ..document import (
     save_text,
     suggested_path,
 )
+from ..outline import containers
 from ..recent import RecentFiles
 from .about import ABOUT_TITLE, about_html
 from .drops import accept_file_drop, dropped_paths
@@ -46,6 +51,7 @@ from .editor import RichTextEditor
 from .find import FindReplacePanel
 from .menus import build_menus
 from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, window_icon
+from .treeview import ContainerTree
 
 __all__ = [
     "CHUMP_WRITE",
@@ -121,6 +127,14 @@ class ChumpWindow(QMainWindow):
         self.find_panel.reported.connect(self.say)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.find_panel)
 
+        # the tree of containers stands to the left of the text, out of sight
+        # until the View menu asks for it; like the search panel it is docked
+        # beside the editor rather than in it, so the text and its line numbers
+        # are left exactly as they are
+        self.treeview = ContainerTree(self)
+        self.treeview.picked.connect(self.reveal_line)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.treeview)
+
         self.setWindowTitle(APP_TITLE)
         icon = window_icon()
         if icon:
@@ -141,6 +155,12 @@ class ChumpWindow(QMainWindow):
             # the list is a convenience, so a list that cannot be read is
             # mentioned in the status bar and the program carries on without it
             self.say(self.recent.broken)
+
+        # the rows are written out whenever the text changes, rather than when
+        # the panel is brought up: a tree of text that is not there any more is
+        # worse than no tree, and the check runs whether anybody is looking or not
+        self.editor.document().contentsChanged.connect(self._refresh_treeview)
+        self._refresh_treeview()
 
         if paths:
             self.open_paths(paths)
@@ -333,6 +353,113 @@ class ChumpWindow(QMainWindow):
         the values of a container before what is written inside it, and every
         container set off from the tags around it with a blank line."""
         self._tweak("Reorder tags", tweaks.reorder_tags)
+
+    # -- the tree of containers -------------------------------------------------
+    def toggle_treeview(self, on: bool | None = None) -> None:
+        """View > Treeview: put the tree beside the text, or take it away.
+
+        ``on`` comes from the ticked menu item when the menu asks.  A person who
+        brought the tree up wants to click a row, so the keyboard goes to the text
+        and not to the tree; that also means typing works straight away after the
+        panel appears.
+        """
+        if on is None:
+            on = self.treeview.isHidden()
+        if on:
+            self.treeview.show()
+        else:
+            self.treeview.hide()
+            # the menu item and the panel are one thing, so a program that hides
+            # the panel without asking still leaves the menu telling the truth
+            self._treeview_action().setChecked(False)
+        self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def reveal_line(self, line: int) -> None:
+        """Put the caret on a container's name and select it.
+
+        The name is what gets selected rather than the whole line, so pressing
+        Ctrl+C after clicking a row copies the tag and nothing else, and a later
+        search finds the word that just been looked at - which is how *Find next*
+        behaves when it lands on something.  Scrolling follows the caret by
+        itself, and ``ensure_line_in_sight`` pulls the line into the middle of the
+        view as well, so a container chosen near the top or bottom of a long file
+        can still be seen with what is written under it.
+
+        The name is looked for from the start of its own line, which is where the
+        outline says it is written; an indented tag is found through its
+        indentation that way, and a line that no longer says what the row said -
+        text edited between the row being made and being clicked - leaves the text
+        alone rather than selecting the wrong thing.
+
+        The caret is moved *after* the view has been scrolled.  A text area asked
+        to show a caret scrolls to it its own way, which puts the line at the top
+        of the view; asking for the caret second lets that scroll undo the centring
+        and leave the line pressed against the bottom instead.
+        """
+        document = self.editor.document()
+        block = document.findBlockByLineNumber(line - 1)
+        if not block.isValid():
+            return
+        name = self._name_on_row(line)
+        at = block.text().find(name) if name else -1
+        if at < 0:
+            return
+        caret = QTextCursor(block)
+        caret.setPosition(block.position() + at)
+        caret.setPosition(caret.position() + len(name), QTextCursor.MoveMode.KeepAnchor)
+        self.ensure_line_in_sight(line)
+        self.editor.setTextCursor(caret)
+        self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def ensure_line_in_sight(self, line: int) -> None:
+        """Bring a line into the middle of the text area.
+
+        ``QTextEdit.centerCursor`` would do this, and is not used because it takes
+        the caret to where the scroll ended up - which on a short document, or one
+        whose lines are taller than the view, is somewhere else in the file
+        altogether, and has been seen to take the process down with it.  The
+        scrollbar is moved instead: the caret stays exactly where it was put, and a
+        line that cannot be centred because there is nothing below it to scroll is
+        left at the bottom of the view, which is as near as the file allows.
+        """
+        document = self.editor.document()
+        block = document.findBlockByLineNumber(line - 1)
+        if not block.isValid():
+            return
+        edge = document.documentLayout().blockBoundingRect(block)
+        bar = self.editor.verticalScrollBar()
+        middle_of_text = self.editor.viewport().height() / 2
+        bar.setValue(round(edge.top() + edge.height() / 2 - middle_of_text))
+
+    def _name_on_row(self, line: int) -> str:
+        """What the tree calls the container written on ``line``, if it has one.
+
+        The rows carry their line numbers and not their names - a name is only
+        wanted here - so the list is asked again, which for a file of this size is
+        nothing, and the answer comes from the same reading as the rows themselves.
+        """
+        for one in containers(self.editor.toPlainText()):
+            if one.line == line:
+                return one.name
+        return ""
+
+    def _refresh_treeview(self) -> None:
+        """Write the rows out again from whatever is on screen now."""
+        self.treeview.set_text(self.editor.toPlainText())
+
+    def _treeview_action(self):
+        """The View menu's Treeview item, which is ticked while the panel is up.
+
+        Found rather than kept, because ``menus.py`` makes the items and this file
+        only names what they do; there are two items in that menu, and looking one
+        up by name beats remembering a fifth object on the window.
+        """
+        for action in self.menuBar().actions():
+            if action.menu() is not None:
+                for item in action.menu().actions():
+                    if item.isCheckable() and item.text().replace("&", "") == "Treeview":
+                        return item
+        raise LookupError("the View menu has no Treeview item")
 
     def _tweak(
         self,

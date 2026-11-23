@@ -45,6 +45,7 @@ from chumpeditor.document import (  # noqa: E402
 from chumpeditor.gui import APP_TITLE, ChumpWindow, RichTextEditor  # noqa: E402
 from chumpeditor.gui.drops import accept_file_drop  # noqa: E402
 from chumpeditor.gui.editor import code_font  # noqa: E402
+from chumpeditor.gui.treeview import ContainerTree  # noqa: E402
 from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
     CREDIT,
@@ -705,9 +706,9 @@ def press_key(qapp, window, widget, shortcut: str) -> None:
     qapp.processEvents()
 
 
-def test_the_menu_bar_offers_file_edit_tweaks_and_help(window):
+def test_the_menu_bar_offers_file_edit_view_tweaks_and_help(window):
     assert [plain(action.text()) for action in window.menuBar().actions()] == [
-        "File", "Edit", "Tweaks", "Help"
+        "File", "Edit", "View", "Tweaks", "Help"
     ]
 
 
@@ -1053,6 +1054,385 @@ def test_the_about_box_names_the_program_the_address_and_the_version(window, dia
     for part in (APP_TITLE, __version__, SUMMARY, DESCRIPTION, CREDIT, HOME_URL):
         assert part in text
     assert f'href="{HOME_URL}"' in text  # the address is a link, not a caption
+
+
+
+# ---------------------------------------------------------------------------
+# the treeview beside the text: one row for each container
+# ---------------------------------------------------------------------------
+NESTED = (
+    "kind                                    \"interior\"\n"   # 1, a value: no row
+    "mesh-table\n"                                             # 2
+    "{\n"
+    "  default\n"                                              # 4
+    "  {\n"
+    "    mesh                                \"ind.im\"\n"     # 6, a value: no row
+    "\n"
+    "    effects\n"                                            # 8
+    "    {\n"
+    "    }\n"
+    "  }\n"
+    "}\n"
+    "kuid-table\n"                                             # 13
+    "{\n"
+    "}\n"
+)
+
+
+@pytest.fixture
+def tree(qapp):
+    """The panel on its own, with no window and no editor anywhere near it.
+
+    What the rows say and which line a row stands for are questions about the
+    panel alone; ``outline.py`` answers the second one, and the panel is asked it
+    directly here so a mistake in the wiring cannot hide one in the tree.
+    """
+    return ContainerTree()
+
+
+def rows_of(item) -> list[str]:
+    """The names under a row of the tree, in the order they are shown."""
+    return [
+        item.child(number).text(0)
+        for number in range(item.childCount())
+    ]
+
+
+def test_the_panel_is_a_strip_on_the_left_with_no_title_bar(tree):
+    """A part of the window rather than a little window of its own: no title bar
+    to drag it by, nothing to float it away, and no close button either, since
+    whether it stands there at all is the View menu's business."""
+    assert tree.titleBarWidget() is not None
+    assert tree.features() == QDockWidget.DockWidgetFeature.NoDockWidgetFeatures
+    assert tree.allowedAreas() == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert tree.isHidden()
+
+
+def test_the_panel_has_no_buttons_of_its_own(tree):
+    """The rows are clicked; there is nothing to press beside them.
+
+    The window's own test counts the buttons in it and expects only the search
+    panel to have any, and this is why a second panel with buttons would be a
+    change worth noticing rather than an accident.
+    """
+    assert tree.findChildren(QPushButton) == []
+
+
+def test_a_container_is_one_row_and_a_value_is_none(tree):
+    tree.set_text(NESTED)
+    assert tree.top_level_count() == 2
+    assert tree.topLevelItem(0).text(0) == "mesh-table"
+    assert tree.topLevelItem(1).text(0) == "kuid-table"
+
+
+def test_sub_containers_stand_under_their_own(tree):
+    """The nesting of the file is the nesting of the rows."""
+    tree.set_text(NESTED)
+    mesh = tree.topLevelItem(0)
+    assert rows_of(mesh) == ["default"]
+    assert rows_of(mesh.child(0)) == ["effects"]
+    # the innermost container holds nothing, and says so by having no rows
+    assert rows_of(mesh.child(0).child(0)) == []
+
+
+def test_every_container_is_shown_opened(tree):
+    """The request was for sub-containers to show opened, not to be hunted for."""
+    tree.set_text(NESTED)
+    mesh = tree.topLevelItem(0)
+    assert mesh.isExpanded()
+    assert mesh.child(0).isExpanded()
+    # the innermost row is opened too: nothing is left shut by accident, and a
+    # container that holds nothing has nothing to show either way
+    assert mesh.child(0).child(0).isExpanded()
+
+
+def test_an_empty_container_still_has_its_row(tree):
+    """A table holding nothing is still a table, and the tree says so.
+
+    ``obsolete-table {}`` written on one line is not that: the codec reads it as
+    a value, and there is no container there to give a row to.
+    """
+    tree.set_text("obsolete-table\n{\n}\n")
+    assert tree.top_level_count() == 1
+    assert rows_of(tree.topLevelItem(0)) == []
+
+    tree.set_text("obsolete-table {}\n")
+    assert tree.top_level_count() == 0
+
+
+def test_a_text_holding_no_containers_gives_an_empty_tree(tree):
+    """No rows rather than a row saying there are none: an empty document and a
+    fault in the file are two different things, and a placeholder would mix them
+    up."""
+    for text in ("", "\n\n", 'kind "interior"\nkuid <kuid:1:2>\n'):
+        tree.set_text(text)
+        assert tree.top_level_count() == 0
+
+
+def test_the_rows_are_written_out_again_from_the_new_text(tree):
+    """The tree follows the text; a row left over from what was erased before is
+    a lie about the file."""
+    tree.set_text(NESTED)
+    assert tree.top_level_count() == 2
+    tree.set_text("kuid-table\n{\n}\n")
+    assert tree.top_level_count() == 1
+    assert tree.topLevelItem(0).text(0) == "kuid-table"
+    tree.set_text("")
+    assert tree.top_level_count() == 0
+
+
+def test_a_row_knows_the_line_its_container_is_written_on(tree):
+    """The line the editor numbers is what a click has to answer with, so it goes
+    into the row when the row is made."""
+    tree.set_text(NESTED)
+    mesh = tree.topLevelItem(0)
+    assert mesh.data(0, Qt.ItemDataRole.UserRole) == 2
+    assert mesh.child(0).data(0, Qt.ItemDataRole.UserRole) == 4
+    assert mesh.child(0).child(0).data(0, Qt.ItemDataRole.UserRole) == 8
+    assert tree.topLevelItem(1).data(0, Qt.ItemDataRole.UserRole) == 13
+
+
+def test_choosing_a_row_says_which_container_it_was(tree):
+    """The panel asks the window nothing: it says which line was picked, and the
+    window decides what that means for the caret."""
+    tree.set_text(NESTED)
+    heard: list[int] = []
+    tree.picked.connect(heard.append)
+
+    tree._a_row_was_chosen(tree.topLevelItem(0).child(0), 0)
+    tree._a_row_was_chosen(tree.topLevelItem(1), 0)
+    assert heard == [4, 13]
+
+
+def test_the_rows_of_a_broken_text_are_written_anyway(tree):
+    """Half-way through an edit the braces do not balance.  A panel that raised
+    would take the window down with it while somebody was typing."""
+    tree.set_text("mesh-table\n{\n  default\n  {\n")
+    assert rows_of(tree.topLevelItem(0)) == ["default"]
+    tree.set_text("}\n}\ntable\n{\n}\n")
+    assert tree.top_level_count() == 1
+    assert tree.topLevelItem(0).text(0) == "table"
+
+
+# ---------------------------------------------------------------------------
+# the treeview in the window: the menu item, and what a click does
+# ---------------------------------------------------------------------------
+def test_the_treeview_stands_to_the_left_of_the_text_and_is_put_away_to_begin_with(window):
+    assert window.treeview.isHidden()
+    assert window.dockWidgetArea(window.treeview) == Qt.DockWidgetArea.LeftDockWidgetArea
+    # it belongs at the left and is not going anywhere else
+    assert window.treeview.allowedAreas() == Qt.DockWidgetArea.LeftDockWidgetArea
+    # the text still has the whole middle of the window to itself
+    assert window.centralWidget() is window.editor
+
+
+def test_the_view_menu_holds_one_ticked_item(window):
+    """One item, ticked while the panel is up.
+
+    A dock with no title bar has no close button of its own, so this item is the
+    only way in and out, and it has to say which way the panel stands.
+    """
+    assert labels(menu_of(window, "View")) == ["Treeview"]
+    assert item(window, "View", "Treeview").isCheckable()
+
+
+def test_the_view_menu_item_is_ticked_only_while_the_panel_is_up(window):
+    ticked = item(window, "View", "Treeview")
+    assert not ticked.isChecked()
+
+    click(window, "View", "Treeview")
+    assert not window.treeview.isHidden()
+    assert ticked.isChecked()
+
+    click(window, "View", "Treeview")
+    assert window.treeview.isHidden()
+    assert not ticked.isChecked()
+
+
+def test_the_keyboard_is_left_in_the_text_when_the_treeview_comes_up(qapp, window):
+    """The point of bringing the tree up is to click a row in it, and typing has
+    to keep working while it does; the panel has no box to type in."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(NESTED)
+    window.editor.setFocus(Qt.FocusReason.OtherFocusReason)
+    qapp.processEvents()
+
+    click(window, "View", "Treeview")
+    assert window.editor.hasFocus()
+
+
+def test_the_tree_is_written_out_as_the_text_is_edited(window):
+    """A row left over from text that was erased before is a lie about the file,
+    so the rows follow every change whether the panel is up or not."""
+    window.editor.setPlainText(NESTED)
+    assert window.treeview.top_level_count() == 2
+
+    window.editor.setPlainText('kind "interior"\n')
+    assert window.treeview.top_level_count() == 0
+
+    window.editor.insertPlainText("table\n{\n}\n")
+    assert window.treeview.top_level_count() == 1
+    assert window.treeview.topLevelItem(0).text(0) == "table"
+
+
+def test_the_rows_of_a_file_opened_from_disk(window, tmp_path):
+    """The sample this was asked for: its containers, nested and opened."""
+    source = copy("config3.txt", tmp_path)
+    assert window.open_file(source)
+
+    tree = window.treeview
+    assert [tree.topLevelItem(n).text(0) for n in range(tree.top_level_count())] == [
+        "mesh-table", "kuid-table"
+    ]
+    mesh = tree.topLevelItem(0)
+    assert rows_of(mesh) == ["default"]
+    assert rows_of(mesh.child(0)) == ["effects"]
+    assert mesh.isExpanded() and mesh.child(0).isExpanded()
+
+
+def test_choosing_a_row_selects_the_name_it_was_clicked_on(window):
+    """The click is answered where the name is written, not anywhere on the line.
+
+    The name alone is selected so that Ctrl+C afterwards copies the tag, and so
+    that *Find next* goes on to the other places that word is written - which is
+    how landing on a search match already behaves.
+    """
+    window.editor.setPlainText(NESTED)
+    click(window, "View", "Treeview")
+
+    choose_row(window, "effects")
+    assert window.editor.textCursor().selectedText() == "effects"
+    assert window.editor.textCursor().blockNumber() + 1 == 8
+
+
+def test_choosing_a_row_takes_the_caret_to_it_from_wherever_it_stood(qapp, window):
+    """The caret moves even when the line it has to move to is off the screen, and
+    the panel keeps nothing: the text has the keyboard either way."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(lines_of(1) + "\n" + NESTED)
+    caret = window.editor.textCursor()
+    caret.movePosition(caret.MoveOperation.End)
+    window.editor.setTextCursor(caret)
+    click(window, "View", "Treeview")
+
+    choose_row(window, "kuid-table")
+    assert window.editor.textCursor().blockNumber() + 1 == 14
+    assert window.editor.textCursor().selectedText() == "kuid-table"
+    assert window.editor.hasFocus()
+
+
+def test_a_row_brought_into_the_middle_of_the_view(qapp, window):
+    """A container chosen in a long file is worth seeing with the text under it,
+    not pressed against the last line of the window."""
+    shown = window.resize(700, 400) or _on_screen(window, qapp)
+    del shown
+    text = "".join(f"table{number}\n{{\n}}\n" for number in range(1, 121))
+    window.editor.setPlainText(text)
+    qapp.processEvents()
+    click(window, "View", "Treeview")
+
+    line = _the_line_of(window.editor, text, "table60")
+    choose_row(window, "table60")
+    seen = [number for number, _, _ in window.editor.visible_lines()]
+    assert line in seen  # the line its name is written on
+    assert max(seen) > line + 2  # and what is written under it came into sight too
+    # near enough the middle: the text area shows some twenty lines
+    middle = len(seen) // 2
+    assert abs(seen.index(line) - middle) <= 3
+
+
+def test_a_row_brought_up_near_the_end_of_a_short_file_is_not_pushed_off_it(qapp, window):
+    """The last container of a file that barely fills the window cannot be centred,
+    because there is nothing under it to scroll; it is left where the file ends
+    rather than having the top of the text dragged down over it."""
+    _on_screen(window, qapp)
+    text = "".join(f"table{number}\n{{\n}}\n" for number in range(1, 13))
+    window.editor.setPlainText(text)
+    qapp.processEvents()
+    click(window, "View", "Treeview")
+
+    line = _the_line_of(window.editor, text, "table12")
+    choose_row(window, "table12")
+    assert window.editor.textCursor().blockNumber() + 1 == line
+    seen = [number for number, _, _ in window.editor.visible_lines()]
+    assert line in seen and max(seen) >= line
+
+
+def _on_screen(window, qapp):
+    """The window up and laid out, which is when lines are in sight at all."""
+    window.show()
+    qapp.processEvents()
+    return window
+
+
+def _the_line_of(editor, text: str, name: str) -> int:
+    """Which line of the editor ``name`` is written on, asked of the document.
+
+    Worked out rather than written into a test, so the test says that the row and
+    the caret agree about where a container stands without having to count the
+    lines of the text itself.
+    """
+    del text
+    for number in range(editor.document().blockCount()):
+        if editor.document().findBlockByNumber(number).text() == name:
+            return number + 1
+    raise AssertionError(f"the text has no {name!r} line")
+
+
+def test_a_row_clicked_after_the_line_changed_selects_nothing(window):
+    """A line that no longer names a container is left alone.
+
+    The rows are made from one reading of the text and can be answered after
+    another - a name half deleted, the file replaced - and selecting some other
+    word that happens to stand there would invite copying the wrong thing.  A row
+    cannot outlive a change itself: writing the rows out again clears the tree and
+    Qt throws the old rows away with it, so this is reached through the line
+    number a click answers with rather than by holding on to a row.
+    """
+    window.editor.setPlainText(NESTED)
+    click(window, "View", "Treeview")
+
+    choose_row(window, "kuid-table")
+    assert window.editor.textCursor().selectedText() == "kuid-table"
+
+    # the last container taken away: line 13 is a closing brace now, not a name
+    window.editor.setPlainText(NESTED.replace("kuid-table\n{\n}\n", "}\n"))
+    window.treeview.picked.emit(13)
+    assert window.editor.textCursor().selectedText() == ""
+
+
+def test_the_treeview_is_ticked_again_when_it_is_hidden_another_way(window):
+    """Hiding the panel without going through the menu leaves the menu telling
+    the truth about it, rather than promising a panel that is not there."""
+    click(window, "View", "Treeview")
+    assert item(window, "View", "Treeview").isChecked()
+
+    window.treeview.hide()
+    window.toggle_treeview(False)
+    assert window.treeview.isHidden()
+    assert not item(window, "View", "Treeview").isChecked()
+
+
+def choose_row(window, name: str) -> None:
+    """A row of the tree, found by its name, clicked as a mouse would.
+
+    The rows are looked for from the top down and depth first, which is the order
+    they are shown in; the click goes through the panel's own handler so what is
+    tested is the signal the row sends and not Qt's mouse plumbing.
+    """
+    def search(item) -> bool:
+        if item.text(0) == name:
+            window.treeview._a_row_was_chosen(item, 0)
+            return True
+        return any(search(item.child(number)) for number in range(item.childCount()))
+
+    tree = window.treeview
+    for number in range(tree.top_level_count()):
+        if search(tree.topLevelItem(number)):
+            return
+    raise AssertionError(f"the tree has no {name!r} row")
 
 
 # ---------------------------------------------------------------------------

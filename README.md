@@ -106,6 +106,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
   as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
   Find next (F3).
+- **View**: Treeview - a tick box that puts a list of the file's containers along
+  the left of the text. See [Tree of containers](#tree-of-containers).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
@@ -203,6 +205,33 @@ two characters.
 
 What is sought is plain text, not a pattern, so brackets, dots and backslashes
 are looked for as the characters they are.
+
+### Tree of containers
+
+**View > Treeview** puts a list of the file's containers along the left of the
+text, under the heading *Containers*. It is a strip of the window rather than a
+window of its own, so nothing about the text area - the numbers down the side,
+the colours, the undo history - is disturbed, and unticking the item puts it away
+again. The panel has no title bar and no buttons of its own; it is wide enough to
+drag wider by its edge.
+
+Every container gets a row, with the containers written inside it below that row
+and indented, all of them opened: a file is looked at rather than explored, and
+nothing has to be clicked twice to see what is in it. A tag written on a line of
+its own with no braces under it - `kind "interior"`, or a `mesh` naming a file -
+holds one value rather than a container, and gets no row. The rows are written
+from the text on screen, so typing `{` after a name brings its row in and taking
+the braces out drops it again; there is nothing to refresh.
+
+Clicking a row puts the caret in the text on the line that names the container,
+with the name itself selected - the way *Find next* leaves a match - and takes
+the keyboard back to the text, so Ctrl+C or Ctrl+D can follow straight after a
+click. The line is brought toward the middle of the view rather than left against
+its top edge, which is what makes the tags inside a container worth looking at;
+near the end of a file, where there is nothing below to scroll through, it stops
+as near the middle as the file allows. A row whose line no longer names that
+container - the name deleted since the rows were written - is left alone rather
+than selecting whatever stands there now.
 
 ### Syntax check
 
