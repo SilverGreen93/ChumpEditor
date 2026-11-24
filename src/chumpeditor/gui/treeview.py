@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..outline import containers
+from .editor import code_font
 
 __all__ = ["ContainerTree", "PANEL_TITLE"]
 
@@ -224,6 +225,12 @@ class ContainerTree(QDockWidget):
         self.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
 
         self.tree = _JoinedRows(self)
+        # the same letters and the same size as the text beside it: a row names a
+        # container that is read in the editor, and a second font in the window
+        # makes the tree look like a different program's window.  Asked of
+        # ``code_font``, the very answer the editor asks, rather than of the
+        # editor itself, so the panel still knows nothing about the window
+        self.tree.setFont(code_font())
         self.tree.setHeaderHidden(True)
         # one column, because the row says the container's name and there is
         # nothing else worth a column of its own; the indentation does the

@@ -238,8 +238,12 @@ The last container under its own turns its line into a corner, and the levels
 that corner closes are left blank on every row after it - a line carried on beside
 them would join rows that are not joined.
 
-Windows draws a tree with triangles and no lines, so the lines are drawn
-by the panel itself, and each level stands half as far behind the one above it as
+The rows are written in the same fixed-width font, at the same size, as the text
+beside them, so the tree reads as part of the same window rather than a second
+program's.
+
+Windows draws a tree with triangles and no lines, so the lines are drawn by the
+panel itself, and each level stands half as far behind the one above it as
 Windows would ask - roomy enough for a file whose deepest containers are three or
 four levels down, without the panel eating the text area. A container holding
 containers carries a mark on the place where its lines meet: pointing down while

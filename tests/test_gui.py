@@ -1147,6 +1147,20 @@ def test_the_panel_has_no_buttons_of_its_own(tree):
     assert tree.findChildren(QPushButton) == []
 
 
+def test_the_rows_are_written_in_the_same_letters_as_the_text(window):
+    """The rows wear the text's font rather than the desktop's default one.
+
+    A row names a container that is read in the editor beside it, so a second
+    face and a second size in the same window reads as two programs standing
+    side by side.  The panel asks for the same ``code_font`` the editor asks for
+    - not for the editor's own font, which would tie the panel to the window.
+    """
+    rows, text = window.treeview.tree.font(), window.editor.font()
+    assert rows.family() == text.family()
+    assert rows.pointSize() == text.pointSize()
+    assert rows.fixedPitch()
+
+
 def test_a_container_is_one_row_and_a_value_is_none(tree):
     tree.set_text(NESTED)
     assert tree.top_level_count() == 2
