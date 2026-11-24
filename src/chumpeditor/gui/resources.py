@@ -26,6 +26,7 @@ __all__ = [
     "HOME_URL",
     "ICON_FILE",
     "SUMMARY",
+    "UNTITLED",
     "resource_path",
     "window_icon",
 ]
@@ -40,6 +41,13 @@ HOME_URL = "https://github.com/SilverGreen93/ChumpEditor"
 DISPLAY_NAME = "Chump Editor"
 
 APP_TITLE = f"{DISPLAY_NAME} {__version__}"
+
+#: what the text on screen is called before any file has been opened into it, and
+#: after a new one has been written nowhere.  The title bar says it and the top row
+#: of the tree of containers says it, and those two are one answer - which file is
+#: on screen - so it is spelled once, here
+UNTITLED = "Untitled"
+
 SUMMARY = "Trainz config editor"
 DESCRIPTION = (
     "Opens a Trainz config in either form - the binary .chump/.cdp container "

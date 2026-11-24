@@ -66,10 +66,11 @@ from chumpeditor.gui.resources import (  # noqa: E402
     HOME_URL,
     ICON_FILE,
     SUMMARY,
+    UNTITLED,
     resource_path,
     window_icon,
 )
-from chumpeditor.gui.window import REPORT_LIMIT, UNTITLED  # noqa: E402
+from chumpeditor.gui.window import REPORT_LIMIT  # noqa: E402
 from chumpeditor.recent import recent_file  # noqa: E402
 
 SAMPLES = Path(__file__).parent / "test_files"
@@ -1162,6 +1163,73 @@ def test_the_rows_are_written_in_the_same_letters_as_the_text(window):
     assert rows.fixedPitch()
 
 
+def test_the_file_stands_at_the_top_of_the_tree(tree):
+    """One row for the file, with the containers written inside it below.
+
+    Every other application shows a file this way, and it says whose containers
+    the names under it are: a list of names with nothing above them reads as rows
+    about no particular file.  The name is given to the panel rather than looked
+    for in it, and it outlives the rows being written out again.
+    """
+    assert tree.file_name() == UNTITLED  # nothing has been said about a file yet
+    tree.set_file_name("config1.chump")
+    assert tree.file_name() == "config1.chump"
+
+    tree.set_text(NESTED)
+    assert tree.tree.topLevelItemCount() == 1
+    assert tree.tree.topLevelItem(0) is tree.file_row
+    assert rows_of(tree.file_row) == ["mesh-table", "kuid-table"]
+
+    tree.set_text("kuid-table\n{\n}\n")
+    assert tree.file_name() == "config1.chump"
+    assert rows_of(tree.file_row) == ["kuid-table"]
+
+
+def test_the_file_is_not_one_of_the_containers(tree):
+    """The row at the top names the file rather than a container in it, so it is
+    not counted among them and clicking it asks the editor for no line."""
+    tree.set_text(NESTED)
+    assert tree.top_level_count() == 2
+
+    heard: list[int] = []
+    tree.picked.connect(heard.append)
+    tree._a_row_was_chosen(tree.file_row, 0)
+    assert heard == []
+    # opened, because the rows written in the file are what the tree is for
+    assert tree.file_row.isExpanded()
+
+
+def test_the_file_is_marked_but_stands_unjoined(qapp, tree):
+    """The row at the top is a group, and it is joined to nothing.
+
+    No row stands above the file for a line to come from, and no name waits at the
+    end of a line run across from it, so its square holds the mark alone.  That
+    mark is what shuts the whole file down to its own row.
+    """
+    tree.set_text(NESTED)
+    tree.show()  # rows have a place on screen only once they are laid out
+    qapp.processEvents()
+
+    picture = _the_panel_painted(tree)
+    room = _the_level_room(tree, tree.file_row, 0)
+    where_x, where_y = _the_meeting_point(room)
+    assert _a_mark_is_there(tree, picture, (where_x, where_y))
+    for place in (
+        (where_x, room.top() + 1),  # nothing stands above the file to join it
+        (where_x, room.bottom() - 1),  # and no other row follows it at its level
+        (room.right() - 1, where_y),  # its name is not reached by a line
+    ):
+        assert not _a_line_is_there(tree, picture, place), f"{place} joins the file to nothing"
+
+    mark = QPoint(*_the_meeting_point(room))
+    QTest.mouseClick(tree.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, mark)
+    qapp.processEvents()
+    assert not tree.file_row.isExpanded(), f"{mark} is the file's mark, and clicking it did not shut it"
+    QTest.mouseClick(tree.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, mark)
+    qapp.processEvents()
+    assert tree.file_row.isExpanded()
+
+
 def test_a_container_is_one_row_and_a_value_is_none(tree):
     tree.set_text(NESTED)
     assert tree.top_level_count() == 2
@@ -1218,12 +1286,13 @@ def test_the_rows_are_joined_by_lines(qapp, tree):
         assert _a_line_is_there(tree, picture, (where_x, room.top() + 1)), f"{row.text(0)} is not joined to the row above"
         assert _a_line_is_there(tree, picture, (room.right() - 1, where_y)), f"{row.text(0)} does not reach its own name"
 
-    # and the level above stands joined all the way down, because a row of that
-    # level - mesh-table - has another row of it to follow
-    level_zero = _the_level_room(tree, effects, 0)
-    above_x = level_zero.left() + level_zero.width() // 2
-    assert _a_line_is_there(tree, picture, (above_x, level_zero.top() + 1))
-    assert _a_line_is_there(tree, picture, (above_x, level_zero.bottom() - 1))
+    # and the level the file's containers stand on is joined all the way down,
+    # because one of them - mesh-table - has another of them to follow.  The file's
+    # own row is level 0, so its containers are level 1
+    containers_level = _the_level_room(tree, effects, 1)
+    above_x = containers_level.left() + containers_level.width() // 2
+    assert _a_line_is_there(tree, picture, (above_x, containers_level.top() + 1))
+    assert _a_line_is_there(tree, picture, (above_x, containers_level.bottom() - 1))
 
 
 def test_a_line_stops_where_the_rows_it_joins_stop(qapp, tree):
@@ -1249,8 +1318,10 @@ def test_a_line_stops_where_the_rows_it_joins_stop(qapp, tree):
     assert not _a_line_is_there(tree, picture, (where_x, room.bottom() - 1)), (
         f"{inner.text(0)} is the last row under its own, and the line runs past it"
     )
-    # the two levels above were closed by corners of their own as well
-    for level in (0, 1):
+    # the three levels above were closed by corners of their own as well: the
+    # container holding this one, the container holding that, and the file whose
+    # only container it already was
+    for level in (0, 1, 2):
         above = _the_level_room(tree, inner, level)
         where_x = above.left() + above.width() // 2
         assert not _a_line_is_there(tree, picture, (where_x, above.top() + 1)), (
@@ -1748,6 +1819,26 @@ def test_the_treeview_is_ticked_again_when_it_is_hidden_another_way(window):
     window.toggle_treeview(False)
     assert window.treeview.isHidden()
     assert not item(window, "View", "Treeview").isChecked()
+
+
+def test_the_tree_names_the_file_the_title_names(window, picks, tmp_path):
+    """The title bar and the top row of the tree answer one question - which file
+    is on screen - so they are named in one go, and writing the text out under a
+    new name moves both of them.
+
+    The name is said to the panel rather than asked for by it, which is why a save
+    nobody refreshed the rows for still leaves the tree naming the right file.
+    """
+    assert window.treeview.file_name() == UNTITLED
+
+    source = copy("config1.chump", tmp_path)
+    window.open_path(source)
+    assert window.treeview.file_name() == "config1.chump"
+
+    replace(window, 'kind "interior"\n')
+    picks.choose.append(str(tmp_path / "second.chump"))
+    assert window.save(ask=True) == tmp_path / "second.chump"
+    assert window.treeview.file_name() == "second.chump"
 
 
 # ---------------------------------------------------------------------------

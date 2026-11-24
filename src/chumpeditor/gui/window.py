@@ -51,7 +51,7 @@ from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
 from .find import FindReplacePanel
 from .menus import build_menus
-from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, window_icon
+from .resources import APP_TITLE, DISPLAY_NAME, DROP_HINT, UNTITLED, window_icon
 from .treeview import ContainerTree
 
 __all__ = [
@@ -60,15 +60,11 @@ __all__ = [
     "REPORT_LIMIT",
     "SYNTAX_TITLE",
     "TEXT_WRITE",
-    "UNTITLED",
     "WINDOW_SIZE",
 ]
 
 #: the starting size: wide enough for a value on column 40 plus its text
 WINDOW_SIZE = (940, 660)
-
-#: what the title shows before any file is in the editor
-UNTITLED = "Untitled"
 
 #: what the report of a syntax check is called, in the menu and on the box
 SYNTAX_TITLE = "Syntax check"
@@ -576,7 +572,7 @@ class ChumpWindow(QMainWindow):
         """
         if not self.editor.document().isModified():
             return True
-        name = self.path.name if self.path else UNTITLED
+        name = self._the_file_name()
         answer = QMessageBox.question(
             self,
             DISPLAY_NAME,
@@ -628,8 +624,19 @@ class ChumpWindow(QMainWindow):
         """Something went wrong and the editor is not going to show it itself."""
         QMessageBox.critical(self, "Error", message)
 
+    def _the_file_name(self) -> str:
+        """What the text on screen is called: the file it came from, or the word
+        for a file that has never been written out."""
+        return self.path.name if self.path else UNTITLED
+
     def _refresh_title(self) -> None:
-        """The file's name, a star while it is unsaved, and the version."""
-        name = self.path.name if self.path else UNTITLED
+        """The file's name, a star while it is unsaved, and the version.
+
+        The same name is put at the top of the tree of containers, because it is
+        one answer - which file is on screen - shown in two places, and asking
+        both from here is what keeps the title and the tree from disagreeing.
+        """
+        name = self._the_file_name()
         star = " *" if self.editor.document().isModified() else ""
         self.setWindowTitle(f"{name}{star} - {APP_TITLE}")
+        self.treeview.set_file_name(name)

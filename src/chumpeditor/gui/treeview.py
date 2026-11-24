@@ -1,4 +1,5 @@
-"""The tree of containers that stands beside the text: one row for each container.
+"""The tree of containers that stands beside the text: a row for the file, and one
+for every container written in it.
 
 It is a dock stood to the left of the text rather than anything written into it,
 following ``gui/find.py``: no title bar and nothing to float it away or close it
@@ -11,11 +12,19 @@ Nothing here asks the window anything: a click sends out the line the container'
 name is written on, exactly as the find panel only reports sentences.  The tree
 holds no editor and knows nothing about one.
 
+At the top of the tree stands the file: one row carrying its name, or
+``Untitled`` while the text has been written nowhere.  That is how every other
+application shows a file, and it says whose containers the rows below are.  The
+name is handed over rather than looked for, because the panel asks the window
+nothing - the window says it whenever it says the title, which is the one answer
+both of them are showing.
+
 Every container starts opened, because the request was for sub-containers to be
 visible rather than hunted for; a row's own mark is there to shut it again for
 anyone who wants the file down to its top level.  Text that holds no containers
-gives an empty tree rather than a row saying so - a placeholder in a tree that is
-empty because the document is empty would read as a fault in the file.
+gives a tree with nothing under the file's own row rather than a row saying so -
+a placeholder in a tree that is empty because the document is empty would read as
+a fault in the file.
 """
 
 from __future__ import annotations
@@ -33,6 +42,7 @@ from PyQt6.QtWidgets import (
 
 from ..outline import containers
 from .editor import code_font
+from .resources import UNTITLED
 
 __all__ = ["ContainerTree", "PANEL_TITLE"]
 
@@ -111,7 +121,9 @@ class _JoinLines(QProxyStyle):
     the middle rather than run through when the row is the last one under its own -
     the corner that says nothing more follows.  Nothing is drawn at all in a level
     whose row above was already such a last one, which is what keeps the strip of
-    lines from carrying on beside rows it no longer joins.
+    lines from carrying on beside rows it no longer joins.  The one row joined to
+    nothing is the file's own, the only row standing at no level at all: no row
+    stands above it for a line to come from, so its square holds the mark alone.
 
     The other two flags answer the mark that says whether a group stands opened:
     ``State_Children`` says there is a group at all, and ``State_Open`` which way
@@ -198,6 +210,15 @@ def _the_join(square: QRect, state, painter: QPainter, ink: QColor) -> None:
     ``square`` is the whole of one level's room on one row, so the vertical of one
     row's square and the vertical of the row under it meet at their shared edge and
     come out as one unbroken line.
+
+    Only the file's own row is left unjoined, and it is recognised by standing at
+    the left edge as its own join: it is the one row written at no level at all,
+    since everything else is written inside it.  Nothing stands above it for a line
+    to come from, and no name follows a line across, so its square holds the mark
+    alone.  Where a row stands is taken from the square rather than asked of the
+    model, because a model asked of the option inside the style takes the process
+    down with it - measured with PyQt6 6.12, which reads as an access violation
+    with no message at all.
     """
     middle_x = square.left() + square.width() // 2
     middle_y = square.top() + square.height() // 2
@@ -214,18 +235,21 @@ def _the_join(square: QRect, state, painter: QPainter, ink: QColor) -> None:
                 painter.drawLine(middle_x, square.top(), middle_x, square.bottom())
             return
         half = _the_mark_size(square) if state & QStyle.StateFlag.State_Children else None
-        if half is None:
-            above, under, across = middle_y, middle_y, middle_x
-        else:
-            above, under, across = middle_y - half - 1, middle_y + half + 1, middle_x + half + 1
-        # down from the row above, as far as the mark or the middle of the square
-        painter.drawLine(middle_x, square.top(), middle_x, above)
-        # and on down only while another row follows at this level; stopping here
-        # is the corner that says this is the last one under its own
-        if follows:
-            painter.drawLine(middle_x, under, middle_x, square.bottom())
-        # across to the name, from the mark or from the middle of the square
-        painter.drawLine(across, middle_y, square.right(), middle_y)
+        if square.left():
+            # a row written inside a level: joined to the row above and to its own
+            # name, which the file's own row, written at no level, is not
+            if half is None:
+                above, under, across = middle_y, middle_y, middle_x
+            else:
+                above, under, across = middle_y - half - 1, middle_y + half + 1, middle_x + half + 1
+            # down from the row above, as far as the mark or the middle of the square
+            painter.drawLine(middle_x, square.top(), middle_x, above)
+            # and on down only while another row follows at this level; stopping here
+            # is the corner that says this is the last one under its own
+            if follows:
+                painter.drawLine(middle_x, under, middle_x, square.bottom())
+            # across to the name, from the mark or from the middle of the square
+            painter.drawLine(across, middle_y, square.right(), middle_y)
         if half is not None:
             # the chevron stands in the gap the lines stopped short of, and is the
             # only part of the drawing that is antialiased: the lines are left
@@ -268,7 +292,8 @@ class _JoinedRows(QTreeWidget):
 
 
 class ContainerTree(QDockWidget):
-    """The rows: one per container, nested as the file nests them."""
+    """The rows: the file's own at the top, and one per container, nested in it as
+    the file nests them."""
 
     #: the line of the container whose row was chosen, counted the way the
     #: numbers down the left of the editor count; the window moves the caret
@@ -302,6 +327,17 @@ class ContainerTree(QDockWidget):
         # why the desktop styles cannot be left to draw the lines themselves
         self.tree.setRootIsDecorated(True)
         self.tree.itemClicked.connect(self._a_row_was_chosen)
+        # the file itself stands at the top of the tree with everything written in
+        # it below, the way every other application shows a file: the names then
+        # read as the contents of one named thing rather than a list with nothing
+        # above them.  Made once, here, rather than out of the text, so the name
+        # the window gave it and the place the user left it - opened or shut -
+        # survive the rows being written out again on every change; and it is
+        # given no line number, because it is the file rather than a container in
+        # it, so clicking it asks the editor for nothing
+        self.file_row = QTreeWidgetItem([UNTITLED])
+        self.file_row.setExpanded(True)
+        self.tree.addTopLevelItem(self.file_row)
         self.setWidget(self.tree)
         self.hide()
 
@@ -312,10 +348,15 @@ class ContainerTree(QDockWidget):
         The flat list ``outline.containers`` answers with is already in tree
         order - a container comes before what is written inside it - so the rows
         are made by walking down it and keeping the last row at each level as the
-        parent of the next one down.  Everything is opened on the way, and an
-        empty text leaves an empty tree.
+        parent of the next one down.  Everything is opened on the way, and text
+        that holds no containers leaves the file's row standing on its own.
         """
-        self.tree.clear()
+        # only the rows under the file's are thrown away, since that row is the
+        # tree's own and carries a name the window gave rather than one the text
+        # can answer; it is opened again because the rows under it are new, and a
+        # shut one would leave a tree that looks empty
+        self.file_row.takeChildren()
+        self.file_row.setExpanded(True)
         # the last row made at each level; a container one level deeper than the
         # row before it belongs under that one
         parents: list[QTreeWidgetItem] = []
@@ -326,24 +367,41 @@ class ContainerTree(QDockWidget):
             if parents:
                 parents[-1].addChild(row)
             else:
-                self.tree.addTopLevelItem(row)
+                self.file_row.addChild(row)
             parents.append(row)
             # opened as it is made: a container's own sub-containers follow it in
             # the list, and opening before they arrive is what shows them
             row.setExpanded(True)
 
+    def set_file_name(self, name: str) -> None:
+        """Say what the file at the top of the tree is called.
+
+        The window says it, because the window is the only thing here that knows
+        which file is on screen; ``Untitled`` is what stands there until it does.
+        """
+        self.file_row.setText(0, name)
+
+    def file_name(self) -> str:
+        """What the row at the top of the tree is called."""
+        return self.file_row.text(0)
+
     def top_level_count(self) -> int:
-        """How many containers stand at the top of the file."""
-        return self.tree.topLevelItemCount()
+        """How many containers stand at the top of the file.
+
+        The file's own row is not one of them: this counts what is written inside
+        the file, which is what the rows under it are.
+        """
+        return self.file_row.childCount()
 
     def topLevelItem(self, row: int) -> QTreeWidgetItem | None:  # noqa: N802 - Qt naming
         """A container standing at the top of the file, by its place in the tree.
 
         The rows belong to ``self.tree``, which is asked directly; this is only
         here so a test about what the panel shows can ask for a row without
-        reaching into the widget inside the dock.
+        reaching into the widget inside the dock.  The places run from the file's
+        own row, which is where its containers are written.
         """
-        return self.tree.topLevelItem(row)
+        return self.file_row.child(row)
 
     # -- the parts that are not decisions -------------------------------------
     def _a_row_was_chosen(self, row: QTreeWidgetItem, _column: int) -> None:

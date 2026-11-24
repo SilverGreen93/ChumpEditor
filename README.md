@@ -216,6 +216,14 @@ again. The panel has no title bar and no buttons of its own; it is wide enough t
 drag wider by its edge. F2 rather than a menu trip, because a panel wanted on
 every file is a panel nobody wants to reach through a menu each time.
 
+At the top of the tree stands the file the text came from - its name, or
+*Untitled* while the text has been written nowhere - with the containers written
+inside it below. That is how every other application shows a file, and it says
+what the names under it belong to. The name is said at the same moment as the
+title bar's, so opening a file or writing one out under a new name changes both
+together. The file's row is not a container: clicking it asks the text for
+nothing, and its mark shuts the whole file down to that one row.
+
 Every container gets a row, with the containers written inside it below that row
 and indented, all of them opened: a file is looked at rather than explored, and
 nothing has to be clicked twice to see what is in it. The rows are joined by
@@ -226,6 +234,7 @@ name, and no further, so the strip of lines reads the way a tree is written out
 in text:
 
 ```
+config1.chump
 ├── kuid-table
 ├── mesh-table
 │   ├── default
@@ -236,7 +245,8 @@ in text:
 
 The last container under its own turns its line into a corner, and the levels
 that corner closes are left blank on every row after it - a line carried on beside
-them would join rows that are not joined.
+them would join rows that are not joined. The file's own level is left blank the
+same way, since only one file is on screen at a time.
 
 The rows are written in the same fixed-width font, at the same size, as the text
 beside them, so the tree reads as part of the same window rather than a second
