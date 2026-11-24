@@ -208,20 +208,50 @@ are looked for as the characters they are.
 
 ### Tree of containers
 
-**View > Treeview** puts a list of the file's containers along the left of the
-text, under the heading *Containers*. It is a strip of the window rather than a
-window of its own, so nothing about the text area - the numbers down the side,
+**View > Treeview** (F2) puts a list of the file's containers along the left of
+the text, under the heading *Containers*. It is a strip of the window rather than
+a window of its own, so nothing about the text area - the numbers down the side,
 the colours, the undo history - is disturbed, and unticking the item puts it away
 again. The panel has no title bar and no buttons of its own; it is wide enough to
-drag wider by its edge.
+drag wider by its edge. F2 rather than a menu trip, because a panel wanted on
+every file is a panel nobody wants to reach through a menu each time.
 
 Every container gets a row, with the containers written inside it below that row
 and indented, all of them opened: a file is looked at rather than explored, and
-nothing has to be clicked twice to see what is in it. A tag written on a line of
-its own with no braces under it - `kind "interior"`, or a `mesh` naming a file -
-holds one value rather than a container, and gets no row. The rows are written
-from the text on screen, so typing `{` after a name brings its row in and taking
-the braces out drops it again; there is nothing to refresh.
+nothing has to be clicked twice to see what is in it. The rows are joined by
+lines, so a name three levels into a `mesh-table` can be followed back to the
+container holding it; indentation alone runs out at that depth. Each line is
+drawn only as far as the place where it meets the line running across to the
+name, and no further, so the strip of lines reads the way a tree is written out
+in text:
+
+```
+├── kuid-table
+├── mesh-table
+│   ├── default
+│   │   └── effects
+│   └── might
+└── obsolete-table
+```
+
+The last container under its own turns its line into a corner, and the levels
+that corner closes are left blank on every row after it - a line carried on beside
+them would join rows that are not joined.
+
+Windows draws a tree with triangles and no lines, so the lines are drawn
+by the panel itself, and each level stands half as far behind the one above it as
+Windows would ask - roomy enough for a file whose deepest containers are three or
+four levels down, without the panel eating the text area. A container holding
+containers carries a mark on the place where its lines meet: pointing down while
+it stands opened, along the row once it is shut. Clicking that mark shuts the
+group or opens it again, and it is the only way to do either, since a click on a
+row means the text and double-clicking a name deliberately expands nothing.
+Everything starts opened, because a file is read rather than explored; shutting a
+group is how a big file is brought back to its top level while being read. A tag written on a line of its own with no braces under it -
+`kind "interior"`, or a `mesh` naming a file - holds one value rather than a
+container, and gets no row. The rows are written from the text on screen, so
+typing `{` after a name brings its row in and taking the braces out drops it
+again; there is nothing to refresh.
 
 Clicking a row puts the caret in the text on the line that names the container,
 with the name itself selected - the way *Find next* leaves a match - and takes

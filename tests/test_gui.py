@@ -19,8 +19,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QEvent, QPoint, Qt, QUrl  # noqa: E402
-from PyQt6.QtGui import QDragLeaveEvent, QKeyEvent, QKeySequence, QTextCursor  # noqa: E402
+from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, QUrl  # noqa: E402
+from PyQt6.QtGui import (  # noqa: E402
+    QDragLeaveEvent,
+    QImage,
+    QKeyEvent,
+    QKeySequence,
+    QPainter,
+    QPalette,
+    QTextCursor,
+)
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
     QDockWidget,
@@ -29,8 +37,10 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QMessageBox,
     QPushButton,
     QTextEdit,
+    QTreeWidget,
     QWidget,
 )
+from PyQt6.QtTest import QTest  # noqa: E402
 
 from chumpeditor import __version__, recent, settings as kept  # noqa: E402
 from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file  # noqa: E402
@@ -45,7 +55,7 @@ from chumpeditor.document import (  # noqa: E402
 from chumpeditor.gui import APP_TITLE, ChumpWindow, RichTextEditor  # noqa: E402
 from chumpeditor.gui.drops import accept_file_drop  # noqa: E402
 from chumpeditor.gui.editor import code_font  # noqa: E402
-from chumpeditor.gui.treeview import ContainerTree  # noqa: E402
+from chumpeditor.gui.treeview import ContainerTree, _the_mark_size  # noqa: E402
 from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
     CREDIT,
@@ -1080,6 +1090,23 @@ NESTED = (
     "}\n"
 )
 
+# the same nesting with nothing standing after it, so every level ends in a
+# corner rather than a join: what a line has to stop doing
+LASTED = (
+    "mesh-table\n"                                            # 1
+    "{\n"
+    "  kuid\n"                                                # 3
+    "  {\n"
+    "  }\n"
+    "  last\n"                                                # 6
+    "  {\n"
+    "    inner\n"                                             # 8
+    "    {\n"
+    "    }\n"
+    "  }\n"
+    "}\n"
+)
+
 
 @pytest.fixture
 def tree(qapp):
@@ -1146,6 +1173,213 @@ def test_every_container_is_shown_opened(tree):
     # the innermost row is opened too: nothing is left shut by accident, and a
     # container that holds nothing has nothing to show either way
     assert mesh.child(0).child(0).isExpanded()
+
+
+def test_the_rows_are_joined_by_lines(qapp, tree):
+    """The lines joining a row to the rows under it, not indentation alone.
+
+    The only way to know a line was drawn is to look for it: the panel is painted
+    into a picture and the picture is asked what stands at the place the line has
+    to be.  A row's own room - the width of one level, standing in front of its
+    name - says where that is, so this checks the ink itself rather than the room
+    left for it, which is exactly the difference the desktop styles get wrong:
+    they leave the room and fill it with a triangle.
+    """
+    tree.set_text(NESTED)
+    tree.show()  # rows have a place on screen only once they are laid out
+    qapp.processEvents()
+
+    picture = _the_panel_painted(tree)
+    mesh = tree.topLevelItem(0)
+    default = mesh.child(0)
+    effects = default.child(0)
+    assert default.childCount() and mesh.childCount()  # the shape this test reads
+
+    # in front of a row, a line reaches down from the row above and across to the
+    # name: the row's own join, drawn as a corner because nothing follows it
+    for row in (default, effects):
+        room = _the_own_room(tree, row)
+        where_x, where_y = _the_meeting_point(room)
+        assert _a_line_is_there(tree, picture, (where_x, room.top() + 1)), f"{row.text(0)} is not joined to the row above"
+        assert _a_line_is_there(tree, picture, (room.right() - 1, where_y)), f"{row.text(0)} does not reach its own name"
+
+    # and the level above stands joined all the way down, because a row of that
+    # level - mesh-table - has another row of it to follow
+    level_zero = _the_level_room(tree, effects, 0)
+    above_x = level_zero.left() + level_zero.width() // 2
+    assert _a_line_is_there(tree, picture, (above_x, level_zero.top() + 1))
+    assert _a_line_is_there(tree, picture, (above_x, level_zero.bottom() - 1))
+
+
+def test_a_line_stops_where_the_rows_it_joins_stop(qapp, tree):
+    """A line is drawn up to the intersection and no further.
+
+    The last row under its own turns the line into a corner, and the levels that
+    were closed by that corner are left blank on the rows after it; a line carried
+    on beside them would join rows that are not joined.
+    """
+    tree.set_text(LASTED)
+    tree.show()
+    qapp.processEvents()
+
+    picture = _the_panel_painted(tree)
+    mesh = tree.topLevelItem(0)
+    assert tree.top_level_count() == 1 and mesh.child(1).childCount()
+
+    inner = mesh.child(1).child(0)
+    room = _the_own_room(tree, inner)
+    where_x, where_y = _the_meeting_point(room)
+    assert _a_line_is_there(tree, picture, (where_x, room.top() + 1))
+    assert _a_line_is_there(tree, picture, (room.right() - 1, where_y))
+    assert not _a_line_is_there(tree, picture, (where_x, room.bottom() - 1)), (
+        f"{inner.text(0)} is the last row under its own, and the line runs past it"
+    )
+    # the two levels above were closed by corners of their own as well
+    for level in (0, 1):
+        above = _the_level_room(tree, inner, level)
+        where_x = above.left() + above.width() // 2
+        assert not _a_line_is_there(tree, picture, (where_x, above.top() + 1)), (
+            f"level {level} is joined below its last row"
+        )
+        assert not _a_line_is_there(tree, picture, (where_x, above.bottom() - 1))
+
+
+def test_a_group_marks_whether_it_stands_opened(qapp, tree):
+    """Down into the rows it holds when opened, along the row when shut.
+
+    The mark stands on the intersection, so the top corners tell the two apart:
+    an opened group is wide across the top of the mark and narrow at the bottom, a
+    shut one the other way about.
+    """
+    tree.set_text(NESTED)
+    tree.show()
+    qapp.processEvents()
+
+    mesh = tree.topLevelItem(0)
+    room = _the_own_room(tree, mesh)
+    where_x, where_y = _the_meeting_point(room)
+    half = _the_mark_size(room)
+    assert half, "a row holding rows was given no room for a mark"
+
+    picture = _the_panel_painted(tree)
+    assert _a_line_is_there(tree, picture, (where_x - half, where_y - half)), "an opened group is not marked as opened"
+    assert not _a_line_is_there(tree, picture, (where_x - half, where_y + half))
+
+    mesh.setExpanded(False)
+    qapp.processEvents()
+    picture = _the_panel_painted(tree)
+    assert _a_line_is_there(tree, picture, (where_x - half, where_y + half)), "a shut group is not marked as shut"
+    assert not _a_line_is_there(tree, picture, (where_x + half, where_y - half))
+    # and shut, the row is still joined to the file: the corner and the line
+    # across to the name are drawn whatever the mark says
+    assert _a_line_is_there(tree, picture, (room.right() - 1, where_y))
+
+
+def test_a_group_is_shut_and_opened_by_its_own_mark(qapp, tree):
+    """The mark is not there to look at: a click on it shuts the row and opens it.
+
+    The panel refuses to expand a row by double-clicking its name, because a click
+    on a row means the text; the mark is the other way in, and it has to work.
+    """
+    tree.set_text(NESTED)
+    tree.show()
+    qapp.processEvents()
+
+    mesh = tree.topLevelItem(0)
+    room = _the_own_room(tree, mesh)
+    mark = QPoint(*_the_meeting_point(room))
+    assert mesh.isExpanded()
+    QTest.mouseClick(tree.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, mark)
+    qapp.processEvents()
+    assert not mesh.isExpanded(), f"{mark} is the mark of the row, and clicking it did not shut it"
+    QTest.mouseClick(tree.tree.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, mark)
+    qapp.processEvents()
+    assert mesh.isExpanded()
+
+
+def test_the_rows_stand_half_as_far_behind_their_own_as_before(qapp, tree):
+    """Half of what Qt asks for, rather than a number written down.
+
+    The style's own answer is asked of a tree of its own, so the panel's room can
+    be compared with what it would have been; 30 pixels on this machine becomes
+    15.  The nesting still has to show - a child stands exactly that much behind
+    its parent - or halving would have taken the tree apart along with the room.
+    """
+    a_plain_tree = QTreeWidget()
+    asked = a_plain_tree.indentation()
+    assert asked > 0, "the style answers no room for the nesting at all"
+    assert tree.tree.indentation() == asked // 2
+
+    tree.set_text(NESTED)
+    tree.show()
+    qapp.processEvents()
+
+    mesh = tree.topLevelItem(0)
+    parent_row, child_row = (
+        tree.tree.visualItemRect(mesh),
+        tree.tree.visualItemRect(mesh.child(0)),
+    )
+    assert child_row.left() == parent_row.left() + tree.tree.indentation()
+
+
+def _the_panel_painted(tree):
+    """The panel as a picture, painted off screen with no window anywhere.
+
+    ``render`` paints the widget and everything in it into a picture of our own,
+    which is the only way to ask what was actually drawn: asking Qt which lines
+    it decorated answers the same thing whether the rows are joined by lines or
+    merely stood further apart.
+    """
+    image = QImage(tree.width(), tree.height(), QImage.Format.Format_ARGB32)
+    image.fill(0xFFFFFFFF)
+    painter = QPainter(image)
+    tree.render(painter)
+    painter.end()
+    return image
+
+
+def _the_ink_of(picture, place) -> str:
+    """The colour of one pixel of a painted panel, as a name to compare."""
+    x, y = place
+    if not (0 <= x < picture.width() and 0 <= y < picture.height()):
+        raise AssertionError(f"{place} is not part of the picture")
+    return picture.pixelColor(x, y).name()
+
+
+def _the_own_room(tree, item) -> QRect:
+    """The room a row's own join stands in: one level wide, in front of the name.
+
+    Asked of the laid-out row rather than worked out, so the picture is read where
+    the row really stands.
+    """
+    place = tree.tree.visualItemRect(item)
+    step = tree.tree.indentation()
+    assert place.height() > 0, f"the row {item.text(0)} has no place on screen"
+    return QRect(place.left() - step, place.top(), step, place.height())
+
+
+def _the_level_room(tree, item, level: int) -> QRect:
+    """The room of one of the levels above a row, on that row's own line."""
+    step = tree.tree.indentation()
+    place = tree.tree.visualItemRect(item)
+    return QRect(level * step, place.top(), step, place.height())
+
+
+def _the_meeting_point(room: QRect) -> tuple[int, int]:
+    """Where the lines of a join meet: the middle of the room they stand in."""
+    return room.left() + room.width() // 2, room.top() + room.height() // 2
+
+
+def _a_line_is_there(tree, picture, place) -> bool:
+    """Whether the panel laid a joining line at this place of its own viewport.
+
+    The lines are drawn in one colour and nothing else in that strip is, so the
+    colour answers whether a line was drawn and where.
+    """
+    x, y = place
+    corner = tree.tree.viewport().mapTo(tree, QPoint(0, 0))
+    ink = tree.tree.palette().color(QPalette.ColorRole.Text).darker(170).name()
+    return _the_ink_of(picture, (corner.x() + x, corner.y() + y)) == ink
 
 
 def test_an_empty_container_still_has_its_row(tree):
