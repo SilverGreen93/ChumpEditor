@@ -107,7 +107,10 @@ are never part of it, and what is saved is plain text whatever a line looked lik
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
   Find next (F3).
 - **View**: Treeview (F2) - a tick box that puts a list of the file's containers
-  along the left of the text. See [Tree of containers](#tree-of-containers).
+  along the left of the text. Wrap lines (F4) - a tick box that makes a line too
+  wide for the text area stand over several rows inside it, instead of running on
+  past the edge. See [Tree of containers](#tree-of-containers) and
+  [Wrap lines](#wrap-lines).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
@@ -282,21 +285,48 @@ container - the name deleted since the rows were written - is left alone rather
 than selecting whatever stands there now.
 
 Whether the panel stands there is remembered for the next time the program starts:
-ticking it writes `"treeview": true` and unticking it writes `false`, in one small
-file beside the list of recent files,
+ticking it writes `"treeview": true` and unticking it writes `false`, and **Wrap
+lines** is written down the same way as `"wrap"`, both in one small file beside the
+list of recent files,
 
 ```
 %APPDATA%\ChumpEditor\settings.json    (Windows)
 ~/.config/ChumpEditor/settings.json    (elsewhere)
 ```
 
-so a window comes back with the panels it was closed with. A panel hidden without
-going through the menu is remembered hidden too, and a value that is neither true
-nor false - a settings file edited by hand - counts as nothing remembered, so the
-panel starts away rather than standing there for reasons nobody can explain. Like
-the list of recent files, the settings are read and written without ever raising:
-a file that cannot be read leaves the status bar saying so and the program opens
-with its defaults.
+so a window comes back with the panels it was closed with, and with its text shaped
+the way it was left. A panel hidden without going through the menu is remembered
+hidden too, and a value that is neither true nor false - a settings file edited by
+hand - counts as nothing remembered, so the panel starts away rather than standing
+there for reasons nobody can explain. Like the list of recent files, the settings are
+read and written without ever raising: a file that cannot be read leaves the status
+bar saying so and the program opens with its defaults.
+
+### Wrap lines
+
+**View > Wrap lines** (F4) decides what happens to a line longer than the text
+area. With the tick off, which is where the editor starts, the line runs on past the
+right edge and the sideways bar underneath the text scrolls along it. With the tick
+on, the line is laid out over as many rows as it needs inside the same width, and
+the sideways bar has nothing left to scroll.
+
+Nothing is done to the file. No character moves, no space is added or taken away,
+Undo is not asked about it, no `*` comes into the title, and what is saved is what
+was read, wrapped or straight. Only the shape the text is shown in is different, and
+that shape is remembered for the next window rather than decided again for each file.
+
+Each shape suits a different way of reading. Straight keeps the columns honest: a
+value and the text beside it stand where they were written, and how far a line runs
+is itself worth seeing. Wrapped is how the long lines of a file - a `license`
+string, a list of names - are read at ordinary width, without scrolling sideways to
+the end of every one of them.
+
+A wrapped line is still one line of the file. The numbers down the left give it one
+number, level with its first row, and the rows below belong to that number; the line
+a *Syntax check* names, or the status bar names after a search, is the same line
+either way. Fewer lines fit in the window once they wrap, and the strip of numbers
+keeps level with the text area as it grows taller by the height of the sideways bar
+it no longer needs.
 
 ### Syntax check
 

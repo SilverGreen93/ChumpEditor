@@ -103,17 +103,23 @@ def _edit(menu, window: QMainWindow) -> None:
 
 
 def _view(menu, window: QMainWindow) -> None:
-    """What stands beside the text: for now, one tree of the file's containers.
+    """How the file is shown: the tree of its containers beside the text, and
+    whether the lines are bent to the width of the text area.
 
-    The item is ticked rather than pressed, because the state it changes is one
-    that goes on being - a panel that stands there until asked not to - and a
-    person looking at the menu should be able to tell which way it stands now.
+    Both items are ticked rather than pressed, because the state each one changes
+    goes on being - a panel that stands there until asked not to, lines that stay
+    wrapped until asked not to - and a person looking at the menu should be able
+    to tell which way each stands now.
 
-    F2 is the key for it: F3 searches and F5 checks the syntax, and a panel that
-    has to be reached through a menu on every file is a panel nobody leaves open.
+    F2 is the key for the tree and F4 the key for the wrap: F3 searches and F5
+    checks the syntax, and anything wanted on file after file is something nobody
+    wants to reach through a menu each time.
     """
     treeview = _add(menu, "&Treeview", QKeySequence("F2"), window.toggle_treeview)
     treeview.setCheckable(True)
+
+    wrapped = _add(menu, "Wrap &lines", QKeySequence("F4"), window.toggle_line_wrap)
+    wrapped.setCheckable(True)
 
 
 def _tweaks(menu, window: QMainWindow) -> None:

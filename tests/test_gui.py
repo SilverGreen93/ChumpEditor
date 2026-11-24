@@ -1595,14 +1595,18 @@ def test_the_treeview_stands_to_the_left_of_the_text_and_is_put_away_to_begin_wi
     assert window.centralWidget() is window.editor
 
 
-def test_the_view_menu_holds_one_ticked_item(window):
-    """One item, ticked while the panel is up.
+def test_the_view_menu_holds_two_ticked_items(window):
+    """Two tick boxes: the panel beside the text, and the shape of the text itself.
 
-    A dock with no title bar has no close button of its own, so this item is the
-    only way in and out, and it has to say which way the panel stands.
+    A dock with no title bar has no close button of its own, so the treeview item is
+    the only way in and out of the panel, and each of the two has to say which way
+    the thing it governs stands - both states go on being once the click that set
+    them has been forgotten.
     """
-    assert labels(menu_of(window, "View")) == ["Treeview"]
-    assert item(window, "View", "Treeview").isCheckable()
+    assert labels(menu_of(window, "View")) == ["Treeview", "Wrap lines"]
+    for label in ("Treeview", "Wrap lines"):
+        assert item(window, "View", label).isCheckable()
+        assert not item(window, "View", label).isChecked()
 
 
 def test_the_view_menu_carries_the_key_for_the_treeview(window):
@@ -1996,6 +2000,225 @@ def choose_row(window, name: str) -> None:
         if search(tree.topLevelItem(number)):
             return
     raise AssertionError(f"the tree has no {name!r} row")
+
+
+# ---------------------------------------------------------------------------
+# Wrap lines: the long lines of a file, bent to the width of the text area
+# ---------------------------------------------------------------------------
+def wide_lines(count: int = 40) -> str:
+    """A file of exactly that many lines, every one of them far too wide for the
+    window: what wrapping was asked for."""
+    return "\n".join(f"tag {number}" + " " + "x" * 1200 for number in range(1, count + 1))
+
+
+def laid_out(editor: QTextEdit, number: int) -> tuple[float, float]:
+    """How wide and how tall one line of the document is laid out."""
+    edge = editor.document().documentLayout().blockBoundingRect(
+        editor.document().findBlockByNumber(number)
+    )
+    return edge.width(), edge.height()
+
+
+def test_the_lines_run_straight_until_they_are_asked_to_wrap(window):
+    """Straight is where the editor starts.
+
+    A value and the text beside it are read down their columns in a chump file,
+    and a file whose lines have been bent is harder to check against the file on
+    disk; nothing is wrapped before anybody asks for it.
+    """
+    assert window.editor.lineWrapMode() == QTextEdit.LineWrapMode.NoWrap
+    assert not window.editor.is_line_wrapped()
+    assert not item(window, "View", "Wrap lines").isChecked()
+
+
+def test_the_view_menu_carries_the_key_for_the_wrap(window):
+    """F4, so the shape of the text can be changed without leaving the file.
+
+    Said here as well as in the menu, because a shortcut nobody wrote down is a
+    shortcut that goes missing when a menu is rewritten.
+    """
+    assert keys(window, "View", "Wrap lines") == "F4"
+
+
+def test_ticking_wrap_lines_bends_the_text_to_the_width_of_the_area(shown, qapp):
+    """The one thing the item is for: a line too wide for the window stops
+    reaching past its edge, and the sideways bar it needed is out of a job."""
+    shown.editor.setPlainText(wide_lines())
+    qapp.processEvents()
+    assert shown.editor.horizontalScrollBar().maximum() > 0
+    wide_before = laid_out(shown.editor, 0)
+
+    click(shown, "View", "Wrap lines")
+    qapp.processEvents()
+
+    assert shown.editor.is_line_wrapped()
+    assert item(shown, "View", "Wrap lines").isChecked()
+    assert shown.editor.horizontalScrollBar().maximum() == 0
+    wide_after = laid_out(shown.editor, 0)
+    assert wide_after[0] <= shown.editor.viewport().width()
+    assert wide_after[0] < wide_before[0]  # narrower ...
+    assert wide_after[1] > wide_before[1]  # ... and standing over more rows
+
+    click(shown, "View", "Wrap lines")
+    qapp.processEvents()
+    assert not shown.editor.is_line_wrapped()
+    assert shown.editor.horizontalScrollBar().maximum() > 0
+    assert laid_out(shown.editor, 0) == wide_before
+
+
+def test_the_wrap_changes_nothing_about_the_text(shown, qapp):
+    """A shape put on the text rather than a change made to it: the characters and
+    their places stay where they were written, no star comes into the title, and
+    one press of Undo still goes back over the file and not over the wrap."""
+    text = wide_lines(30)
+    shown.editor.setPlainText(text)
+    shown.editor.document().setModified(False)
+    lines, undoable = shown.editor.document().blockCount(), shown.editor.document().isUndoAvailable()
+
+    click(shown, "View", "Wrap lines")
+    click(shown, "View", "Wrap lines")
+    qapp.processEvents()
+
+    assert shown.editor.toPlainText() == text
+    assert shown.editor.document().blockCount() == lines
+    assert not shown.editor.document().isModified()
+    assert shown.editor.document().isUndoAvailable() == undoable
+    assert "*" not in shown.windowTitle()
+
+
+def test_the_numbers_keep_up_when_the_lines_are_wrapped(shown, qapp):
+    """Taking the sideways bar away makes the text area a bar taller, and the strip
+    of numbers has to stop where the text does instead of running on behind the bar
+    that used to be there."""
+    shown.editor.setPlainText(wide_lines())
+    qapp.processEvents()
+    before = shown.editor.viewport().height()
+
+    click(shown, "View", "Wrap lines")
+    qapp.processEvents()
+
+    strip, text = shown.editor.gutter.geometry(), shown.editor.viewport().geometry()
+    assert text.height() > before  # the room the sideways bar had is the text's now
+    assert strip.height() == text.height()
+    assert strip.top() == text.top()
+    assert strip.right() < text.left()
+
+
+def test_a_wrapped_line_is_still_one_number_in_the_right_place(shown, qapp):
+    """Every row of a wrapped line belongs to the same line of the file, so it gets
+    one number, level with the first of its rows - which is what the reader means by
+    line 12, and the same numbering the save dialogs count with."""
+    shown.editor.setPlainText(wide_lines())
+    click(shown, "View", "Wrap lines")
+    qapp.processEvents()
+
+    lines = shown.editor.visible_lines()
+    assert [number for number, _, _ in lines] == list(range(1, len(lines) + 1))
+    assert len(lines) < 40  # each line stands over several rows, so fewer of them fit
+    for number, top, height in lines:
+        if top >= 0:
+            caret = shown.editor.cursorForPosition(QPoint(2, top + height // 2))
+            assert caret.blockNumber() + 1 == number
+
+
+def test_F4_wraps_the_lines_and_takes_the_wrap_away_again(qapp, window):
+    """The key answers from wherever the keyboard stands, and types nothing."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(NESTED)
+    qapp.processEvents()
+
+    press_key(qapp, window, window.editor, "F4")
+    assert window.editor.is_line_wrapped()
+    assert item(window, "View", "Wrap lines").isChecked()
+    assert window.editor.toPlainText() == NESTED  # the key is not typed into the text
+
+    press_key(qapp, window, window.editor, "F4")
+    assert not window.editor.is_line_wrapped()
+    assert not item(window, "View", "Wrap lines").isChecked()
+    assert window.editor.toPlainText() == NESTED
+
+
+def test_the_keyboard_is_left_in_the_text_when_the_wrap_is_touched(qapp, window):
+    """The key is pressed in the text and the text keeps it, so reading goes on."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(NESTED)
+    press_key(qapp, window, window.editor, "F4")
+    assert window.editor.hasFocus()
+
+
+def test_wrapping_the_lines_is_written_down_for_the_next_window(window, settings):
+    """Whether the lines are bent is a habit rather than a decision made file by
+    file, so the next window starts with them the way this one was left."""
+    click(window, "View", "Wrap lines")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {"wrap": True}
+
+    again = ChumpWindow()
+    try:
+        assert again.editor.is_line_wrapped()
+        assert item(again, "View", "Wrap lines").isChecked()
+    finally:
+        again.close()
+
+
+def test_taking_the_wrap_off_is_written_down_too(window, settings):
+    """Remembering includes remembering that the lines were left straight."""
+    click(window, "View", "Wrap lines")
+    click(window, "View", "Wrap lines")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {"wrap": False}
+
+    again = ChumpWindow()
+    try:
+        assert not again.editor.is_line_wrapped()
+        assert not item(again, "View", "Wrap lines").isChecked()
+    finally:
+        again.close()
+
+
+def test_a_wrap_brought_up_with_F4_is_remembered_like_any_other_way(qapp, window, settings):
+    """The key goes through the same door as the menu item, so it remembers too."""
+    window.show()
+    qapp.processEvents()
+    press_key(qapp, window, window.editor, "F4")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {"wrap": True}
+
+
+def test_a_wrap_setting_that_is_not_a_tick_counts_as_nothing_remembered(window, settings):
+    """``"wrap": "bend them please"`` in a settings file is a mistake, and lines
+    that run straight when they were wanted bent are a smaller surprise than the
+    other way about."""
+    (settings / "settings.json").write_text(
+        json.dumps({"wrap": "bend them please"}), encoding="utf-8"
+    )
+    shown = ChumpWindow()
+    try:
+        assert not shown.editor.is_line_wrapped()
+        assert not item(shown, "View", "Wrap lines").isChecked()
+    finally:
+        shown.close()
+
+
+def test_the_wrap_and_the_treeview_are_remembered_apart(window, settings):
+    """Two settings, one file: writing one leaves the other, and anything else
+    somebody put in the file by hand, exactly where it was."""
+    click(window, "View", "Wrap lines")
+    click(window, "View", "Treeview")
+    written = json.loads((settings / "settings.json").read_text(encoding="utf-8"))
+    assert written == {"treeview": True, "wrap": True}
+
+    click(window, "View", "Treeview")  # the tree away, the lines still bent
+    again = ChumpWindow()
+    try:
+        assert again.treeview.isHidden()
+        assert again.editor.is_line_wrapped()
+        assert item(again, "View", "Wrap lines").isChecked()
+    finally:
+        again.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": False,
+        "wrap": True,
+    }
 
 
 # ---------------------------------------------------------------------------

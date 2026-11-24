@@ -75,6 +75,9 @@ REPORT_LIMIT = 25
 #: what the settings file calls the tree of containers, true while it stands open
 TREEVIEW_SETTING = "treeview"
 
+#: what the settings file calls the wrapping of long lines, true while they bend
+WRAP_SETTING = "wrap"
+
 
 @dataclass(frozen=True)
 class WriteForm:
@@ -166,6 +169,7 @@ class ChumpWindow(QMainWindow):
         self.editor.document().contentsChanged.connect(self._refresh_treeview)
         self._refresh_treeview()
         self._restore_treeview()
+        self._restore_line_wrap()
 
         if paths:
             self.open_paths(paths)
@@ -379,7 +383,7 @@ class ChumpWindow(QMainWindow):
             self.treeview.hide()
             # the menu item and the panel are one thing, so a program that hides
             # the panel without asking still leaves the menu telling the truth
-            self._treeview_action().setChecked(False)
+            self._view_item("Treeview").setChecked(False)
         self.settings.set(TREEVIEW_SETTING, on)
         self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
 
@@ -396,7 +400,7 @@ class ChumpWindow(QMainWindow):
         if not self.settings.get(TREEVIEW_SETTING, False, as_=bool):
             return
         self.treeview.show()
-        self._treeview_action().setChecked(True)
+        self._view_item("Treeview").setChecked(True)
 
     def reveal_line(self, line: int) -> None:
         """Put the caret on a container's name and select it.
@@ -471,19 +475,58 @@ class ChumpWindow(QMainWindow):
         """Write the rows out again from whatever is on screen now."""
         self.treeview.set_text(self.editor.toPlainText())
 
-    def _treeview_action(self):
-        """The View menu's Treeview item, which is ticked while the panel is up.
+    def _view_item(self, label: str):
+        """The View menu's checkable item called ``label``, without its ampersand.
 
         Found rather than kept, because ``menus.py`` makes the items and this file
         only names what they do; there are two items in that menu, and looking one
-        up by name beats remembering a fifth object on the window.
+        up by name beats remembering another object on the window.
         """
         for action in self.menuBar().actions():
             if action.menu() is not None:
                 for item in action.menu().actions():
-                    if item.isCheckable() and item.text().replace("&", "") == "Treeview":
+                    if item.isCheckable() and item.text().replace("&", "") == label:
                         return item
-        raise LookupError("the View menu has no Treeview item")
+        raise LookupError(f"the View menu has no {label} item")
+
+    # -- how the lines are shown ----------------------------------------------------
+    def toggle_line_wrap(self, on: bool | None = None) -> None:
+        """View > Wrap lines: bend the lines too long for the text area, or let
+        them run on past its edge.
+
+        ``on`` comes from the ticked item when the menu or the key asks, and is
+        left out to mean the opposite of the way it stands now.  The item is put
+        in the same state either way, because a menu that says one thing while the
+        text does another is a menu that cannot be trusted.
+
+        What changes is only the shape the text is shown in: nothing is written to
+        the document, so the undo history is untouched, a line that wraps over three
+        rows is still one line of the file and still has one number beside it, and
+        the sideways bar the long lines needed comes and goes with them.
+
+        Which way it stands is written down, because whether the lines run straight
+        is a habit rather than a decision made file by file.
+        """
+        if on is None:
+            on = not self.editor.is_line_wrapped()
+        self.editor.set_line_wrap(on)
+        self._view_item("Wrap lines").setChecked(on)
+        self.settings.set(WRAP_SETTING, on)
+
+    def _restore_line_wrap(self) -> None:
+        """Bend the lines again if the last session left them bent.
+
+        The text area starts with its lines straight and the menu item unticked, so
+        both are put right here; ticking the item is not enough, because an item
+        brought to the checked state by a program does not fire its own shortcut's
+        slot.  A value that is neither true nor false - a settings file edited by
+        hand - counts for nothing, and the lines run straight as they would have
+        with no file at all.
+        """
+        if not self.settings.get(WRAP_SETTING, False, as_=bool):
+            return
+        self.editor.set_line_wrap(True)
+        self._view_item("Wrap lines").setChecked(True)
 
     def _tweak(
         self,

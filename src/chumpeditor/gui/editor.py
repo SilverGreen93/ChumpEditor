@@ -270,10 +270,21 @@ class RichTextEditor(QTextEdit):
         self.highlighter.set_theme(theme)
 
     def set_line_wrap(self, wrap: bool) -> None:
-        """Wrapped for reading, straight for keeping the columns honest."""
+        """Wrapped for reading, straight for keeping the columns honest.
+
+        A line that is bent to the width of the area is still one line of the
+        document: every character keeps the place it was written in, the line is
+        numbered once down the side of the text, and what is saved says what the
+        file said.  Which of the two shapes is on screen is a View choice, and the
+        window remembers it; the text area only ever answers to being asked.
+        """
         self.setLineWrapMode(
             QTextEdit.LineWrapMode.WidgetWidth if wrap else QTextEdit.LineWrapMode.NoWrap
         )
+
+    def is_line_wrapped(self) -> bool:
+        """Whether long lines are bent to the width of the area, or run on past it."""
+        return self.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
 
     def apply_rewrites(self, rewrites: Iterable[Rewrite]) -> None:
         """Cut out stretches of the text and write their replacements in.
