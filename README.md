@@ -116,6 +116,9 @@ it, and what is saved is plain text whatever a line looked like.
 - Ctrl held while the mouse wheel turns over the text sizes the letters, one point
   a notch, and that size is remembered. A wheel without Ctrl only scrolls. See
   [The size of the text](#the-size-of-the-text).
+- The window comes back the size it was closed at, filled across the screen or not;
+  the first time it opens at 940 by 660. See
+  [The size of the window](#the-size-of-the-window).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
@@ -290,9 +293,11 @@ container - the name deleted since the rows were written - is left alone rather
 than selecting whatever stands there now.
 
 Whether the panel stands there is remembered for the next time the program starts:
-ticking it writes `"treeview": true` and unticking it writes `false`. **Wrap
-lines** is written down the same way as `"wrap"`, and the size the text was left at
-as `"font_size"`; all three live in one small file beside the list of recent files,
+ticking it writes `"treeview": true` and unticking it writes `false`. **Wrap lines**
+is written down the same way as `"wrap"`, and the size the text was left at as
+`"font_size"`, and the window itself comes back at the size it was closed at under
+`"window_size"` and `"maximized"`; all of it lives in one small file beside the list
+of recent files,
 
 ```
 %APPDATA%\ChumpEditor\settings.json    (Windows)
@@ -361,6 +366,30 @@ with its text as big as the last one left it. A window that has remembered nothi
 starts at 11 points and writes no settings file that nobody changed; a size named
 outside the bounds is brought inside them, and a value that is not a number at all
 counts as nothing remembered.
+
+### The size of the window
+
+The window opens at 940 by 660 and stays however big you leave it, maximized or not.
+Its width and height are written as `"window_size"` and the next window opens at that
+size; whether it stood filled across the screen comes back as `"maximized"`, and
+taking the maximize off before closing writes that down as well.
+
+The size kept for a maximized window is the one it had before it was filled across
+the screen, since that is the size it goes back to when somebody takes the maximize
+off it - which is the point of a window that opens maximized: un-maximizing it should
+give back the window you sized, not one sized to the monitor.
+
+Only the size is kept, and not where on the screen the window stood: a window
+remembered at a place no monitor has any more is a window nobody can see, and the
+desktop is not this program's to arrange.
+
+Both are written as the window closes rather than as it is resized, because a resize
+by hand is a hundred changes a second and a settings file written for every one of
+them is not worth the disk. A window closed at a size the file already names writes
+nothing, and a window talked out of closing by the question about unsaved work writes
+nothing either, since it did not close. A size that is not two numbers - a settings
+file edited by hand - counts as nothing remembered, so the window starts at its
+default rather than four pixels wide.
 
 ### Syntax check
 

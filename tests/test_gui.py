@@ -76,7 +76,7 @@ from chumpeditor.gui.resources import (  # noqa: E402
     resource_path,
     window_icon,
 )
-from chumpeditor.gui.window import REPORT_LIMIT  # noqa: E402
+from chumpeditor.gui.window import REPORT_LIMIT, WINDOW_SIZE  # noqa: E402
 from chumpeditor.recent import recent_file  # noqa: E402
 
 SAMPLES = Path(__file__).parent / "test_files"
@@ -1949,10 +1949,10 @@ def test_settings_written_for_one_panel_leave_the_other_alone(settings, tmp_path
         assert not shown.treeview.isHidden()  # the file's own answer was read
         click(shown, "View", "Treeview")  # down to False
         shown.open_path(one)  # and a file opened, which writes the list beside it
+        written = json.loads((settings / "settings.json").read_text(encoding="utf-8"))
     finally:
         shown.close()
 
-    written = json.loads((settings / "settings.json").read_text(encoding="utf-8"))
     assert written == {"theme": "classic", "treeview": False}
     assert json.loads((settings / "recent.json").read_text(encoding="utf-8")) == [str(one)]
 
@@ -2219,12 +2219,12 @@ def test_the_wrap_and_the_treeview_are_remembered_apart(window, settings):
         assert again.treeview.isHidden()
         assert again.editor.is_line_wrapped()
         assert item(again, "View", "Wrap lines").isChecked()
+        assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+            "treeview": False,
+            "wrap": True,
+        }
     finally:
         again.close()
-    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
-        "treeview": False,
-        "wrap": True,
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -2450,9 +2450,9 @@ def test_a_size_that_is_not_a_number_counts_as_nothing_remembered(window, settin
     again = ChumpWindow()
     try:
         assert again.editor.font_size() == FONT_POINT_SIZE
+        assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == hand_written
     finally:
         again.close()
-    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == hand_written
 
 
 def test_a_size_beyond_the_bounds_is_brought_inside_them(window, settings):
@@ -2464,11 +2464,177 @@ def test_a_size_beyond_the_bounds_is_brought_inside_them(window, settings):
     again = ChumpWindow()
     try:
         assert again.editor.font_size() == FONT_MAX_POINTS
+        assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+            "font_size": FONT_MAX_POINTS
+        }
     finally:
         again.close()
+
+
+# ---------------------------------------------------------------------------
+# The size of the window: the shape it was left in, kept for the next window
+# ---------------------------------------------------------------------------
+def test_the_window_starts_at_the_size_it_is_made_at(window, settings):
+    """Wide enough for a value on column 40 plus its text, and nothing has been
+    written down about it yet: a window that has only been built has never been
+    closed, and the shape is a thing about a window that has finished."""
+    assert (window.width(), window.height()) == WINDOW_SIZE
+    assert not window.isMaximized()
+    assert not (settings / "settings.json").exists()
+
+
+def test_a_window_closed_at_a_size_opens_the_next_one_at_it(shown, qapp, settings):
+    """A window is sized once and then read in it for hours, so the size is a
+    habit rather than a decision made again for every file."""
+    shown.resize(1180, 760)
+    qapp.processEvents()
+    shown.close()
     assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
-        "font_size": FONT_MAX_POINTS
+        "window_size": [1180, 760],
+        "maximized": False,
     }
+
+    again = ChumpWindow()
+    try:
+        assert (again.width(), again.height()) == (1180, 760)
+        assert not again.isMaximized()
+    finally:
+        again.close()
+
+
+def test_the_window_is_remembered_by_its_size_and_not_by_where_it_stood(shown, qapp, settings):
+    """The size is kept and the place on the screen is not, on purpose: a window
+    remembered at a place no monitor has any more is a window nobody can see, and
+    the desktop is not this program's to arrange."""
+    shown.resize(1180, 760)
+    shown.move(400, 250)
+    qapp.processEvents()
+    shown.close()
+    assert sorted(json.loads((settings / "settings.json").read_text(encoding="utf-8"))) == [
+        "maximized",
+        "window_size",
+    ]
+
+
+def test_a_window_closed_maximized_comes_back_maximized(shown, qapp, settings):
+    """Whether the window stood filled across the screen is asked about as often
+    as how big it was, and it is the one thing the size says nothing about."""
+    shown.resize(1180, 760)
+    shown.showMaximized()
+    qapp.processEvents()
+    shown.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "window_size": [1180, 760],
+        "maximized": True,
+    }
+
+    again = ChumpWindow()
+    try:
+        assert again.isMaximized()
+    finally:
+        again.close()
+
+
+def test_a_window_closed_maximized_keeps_the_size_it_had_before_it_was_filled(shown, qapp, settings):
+    """The size worth keeping is the one the window goes back to when somebody
+    takes the maximize off it, not the size of the screen it happened to fill."""
+    shown.resize(1180, 760)
+    qapp.processEvents()
+    shown.showMaximized()
+    qapp.processEvents()
+    assert shown.normalGeometry().width() == 1180
+    shown.close()
+
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8"))["window_size"] == [
+        1180,
+        760,
+    ]
+
+    again = ChumpWindow()
+    again.show()
+    qapp.processEvents()
+    try:
+        assert again.isMaximized()
+        again.showNormal()
+        qapp.processEvents()
+        assert (again.width(), again.height()) == (1180, 760)
+    finally:
+        again.close()
+
+
+def test_taking_the_maximize_off_is_written_down_too(shown, qapp, settings):
+    """Remembering includes remembering that the window was left at a size of
+    somebody's own choosing rather than filled across the screen."""
+    shown.showMaximized()
+    qapp.processEvents()
+    shown.showNormal()
+    qapp.processEvents()
+    shown.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8"))["maximized"] is False
+
+
+def test_a_window_talked_out_of_closing_says_nothing_about_itself(window, monkeypatch, settings):
+    """The shape is remembered on the way out, and a window that was asked about
+    the work and then kept has not gone out at all."""
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: QMessageBox.StandardButton.Cancel),
+    )
+    replace(window, "k 1\n")  # work that was never written out
+
+    window.close()
+    assert not (settings / "settings.json").exists()
+
+
+def test_a_window_closed_at_a_size_it_was_already_writes_the_file_no_again(window, settings):
+    """The file is written when something changes, and a window closed at a size
+    the file already names has changed nothing about it."""
+    window.close()
+    once = (settings / "settings.json").read_text(encoding="utf-8")
+
+    again = ChumpWindow()
+    again.close()
+    assert (settings / "settings.json").read_text(encoding="utf-8") == once
+
+
+@pytest.mark.parametrize(
+    "hand_written", ([1180], ["wide", 760], [0, 760], [-5, -5], 1180, {"width": 1180})
+)
+def test_a_window_size_that_is_not_two_numbers_counts_as_nothing_remembered(
+    window, settings, hand_written
+):
+    """A settings file is a text file somebody can edit by hand, and a window at
+    the size it always starts at is a smaller surprise than a window four pixels
+    wide, or one whose width is a word."""
+    (settings / "settings.json").write_text(
+        json.dumps({"window_size": hand_written}), encoding="utf-8"
+    )
+    assert (window.width(), window.height()) == WINDOW_SIZE
+
+
+def test_the_shape_of_the_window_is_written_down_beside_the_other_settings(window, settings):
+    """Four settings, one file: the shape of a window adds its lines and leaves
+    the panel, the wrap and the size of the text exactly where they were."""
+    click(window, "View", "Treeview")
+    click(window, "View", "Wrap lines")
+    turn(window.editor, 3)
+    window.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": True,
+        "wrap": True,
+        "font_size": FONT_POINT_SIZE + 3,
+        "window_size": list(WINDOW_SIZE),
+        "maximized": False,
+    }
+
+    again = ChumpWindow()
+    try:
+        assert not again.treeview.isHidden()
+        assert again.editor.is_line_wrapped()
+        assert again.editor.font_size() == FONT_POINT_SIZE + 3
+        assert (again.width(), again.height()) == WINDOW_SIZE
+    finally:
+        again.close()
 
 
 # ---------------------------------------------------------------------------

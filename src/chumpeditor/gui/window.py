@@ -81,6 +81,11 @@ WRAP_SETTING = "wrap"
 #: what the settings file calls the size of the text, in points
 FONT_SIZE_SETTING = "font_size"
 
+#: what the settings file calls the size of the window, its width and its height
+WINDOW_SIZE_SETTING = "window_size"
+#: what the settings file calls the window standing filled across the screen
+MAXIMIZED_SETTING = "maximized"
+
 
 @dataclass(frozen=True)
 class WriteForm:
@@ -182,6 +187,7 @@ class ChumpWindow(QMainWindow):
         self._restore_treeview()
         self._restore_line_wrap()
         self._restore_font_size()
+        self._restore_window()
 
         if paths:
             self.open_paths(paths)
@@ -670,10 +676,56 @@ class ChumpWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
         """Closing over work that was never written out is asked about first."""
-        if self._ok_to_replace():
-            event.accept()
-        else:
+        if not self._ok_to_replace():
             event.ignore()
+            return
+        # the window's own shape is remembered on the way out, once, rather than
+        # at every pixel of somebody dragging an edge
+        self._remember_window()
+        event.accept()
+
+    # -- the window itself ----------------------------------------------------
+    def _remember_window(self) -> None:
+        """Write down how big the window was, and whether it stood maximized.
+
+        Both are habits rather than decisions made again for each file: a window
+        is sized once and then read in for as long as the work lasts.  They are
+        written as the window closes rather than as it is resized, because a
+        resize by hand is a hundred changes a second and a settings file written
+        for every one of them is not worth the disk.
+
+        A window standing filled across the screen is asked for the size it had
+        before it was filled, since that is the size it goes back to when somebody
+        takes the maximize off it again.
+        """
+        was = self.normalGeometry() if self.isMaximized() else self.geometry()
+        self.settings.set(WINDOW_SIZE_SETTING, [was.width(), was.height()])
+        self.settings.set(MAXIMIZED_SETTING, self.isMaximized())
+
+    def _restore_window(self) -> None:
+        """Stand the window at the size the last one was left at.
+
+        Only the size comes back, and not the place on the screen it stood: a
+        window remembered at a place no monitor has any more is a window nobody
+        can see, and the desktop is not the program's to arrange.
+
+        A size that is not two numbers with something in them - a settings file
+        edited by hand - counts as nothing remembered.  A size that is a number
+        but too small for a window is handed to Qt, which brings it up to the
+        least a window can be, so the next window closed writes a size that was
+        actually seen.
+        """
+        remembered = self.settings.get(WINDOW_SIZE_SETTING, None, as_=list)
+        if remembered is not None and len(remembered) == 2 and all(
+            isinstance(way, (int, float)) and not isinstance(way, bool) and way > 0
+            for way in remembered
+        ):
+            self.resize(int(remembered[0]), int(remembered[1]))
+        if self.settings.get(MAXIMIZED_SETTING, False, as_=bool):
+            # asked for before the window is ever shown, because a plain show()
+            # of a window that is already maximized is how Qt takes the maximize
+            # back off, and the window is shown by whoever made it
+            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
 
     # -- drag and drop ------------------------------------------------------
     def dragEnterEvent(self, event) -> None:  # noqa: N802 - Qt naming
