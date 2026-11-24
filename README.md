@@ -763,7 +763,7 @@ Add/Remove Programs. **ChumpEditor**, without one, is what a person types:
 
 ## Notes on the format
 
-See [chump-format.md](https://github.com/SilverGreen93/CDPExplorer/blob/master/chump-format.md) for the reference. The short version:
+See [chump-format.md](chump-format.md) for the reference. The short version:
 
 - A `.chump` starts with `ACS$`, the format version (1), a reserved zero and
   the content length; the tags start at offset 16.
@@ -789,6 +789,8 @@ a different type byte. Nothing in this repo's samples is `BINARY`, which is why
 the round-trip tests pass; if a `.chump` of yours has one, keep the original
 next to the text rather than deleting it. Everything else - containers, ints,
 floats, strings, nulls, kuids - survives.
+
+The assets.tdx format is described in [tdx-format.md](tdx-format.md)
 
 ## Related software
 
