@@ -341,6 +341,21 @@ class ContainerTree(QDockWidget):
         self.setWidget(self.tree)
         self.hide()
 
+    # -- how the rows are written --------------------------------------------
+    def set_font_size(self, points: float) -> None:
+        """Write the rows at ``points``, the size the text beside them is at.
+
+        The panel asks for ``code_font`` when it is made, which is the size the
+        text starts out at; when the text is made bigger or smaller the rows are
+        asked to match it again, because one face at two sizes is two programs'
+        windows standing side by side.  Nothing else has to be told: the joining
+        lines and the open/shut marks are placed off the room a row takes, which
+        Qt measures out of this font, so they move with it.
+        """
+        font = code_font()
+        font.setPointSizeF(points)
+        self.tree.setFont(font)
+
     # -- what the tree shows --------------------------------------------------
     def set_text(self, text: str) -> None:
         """Write the rows out again from the text on screen.

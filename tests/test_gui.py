@@ -19,7 +19,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, QUrl  # noqa: E402
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, Qt, QUrl  # noqa: E402
 from PyQt6.QtGui import (  # noqa: E402
     QColor,
     QDragLeaveEvent,
@@ -29,6 +29,7 @@ from PyQt6.QtGui import (  # noqa: E402
     QPainter,
     QPalette,
     QTextCursor,
+    QWheelEvent,
 )
 from PyQt6.QtWidgets import (  # noqa: E402
     QApplication,
@@ -55,7 +56,12 @@ from chumpeditor.document import (  # noqa: E402
 )
 from chumpeditor.gui import APP_TITLE, ChumpWindow, RichTextEditor  # noqa: E402
 from chumpeditor.gui.drops import accept_file_drop  # noqa: E402
-from chumpeditor.gui.editor import code_font  # noqa: E402
+from chumpeditor.gui.editor import (  # noqa: E402
+    FONT_MAX_POINTS,
+    FONT_MIN_POINTS,
+    FONT_POINT_SIZE,
+    code_font,
+)
 from chumpeditor.gui.treeview import ContainerTree, _the_line_ink, _the_mark_size  # noqa: E402
 from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
@@ -2218,6 +2224,250 @@ def test_the_wrap_and_the_treeview_are_remembered_apart(window, settings):
     assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
         "treeview": False,
         "wrap": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# The size of the text: Ctrl and the wheel, and the size kept for the next time
+# ---------------------------------------------------------------------------
+def turn(editor: QTextEdit, notches: int, ctrl: bool = True) -> None:
+    """That many wheel turns over the text, with Ctrl or without it.
+
+    Qt counts a notch of a wheel as 120 units of turn, which is what one move of
+    a wheel by hand sends, so a turn here is one notch, laid on the widget a
+    mouse under Qt lays it on: the viewport the text is drawn in, not the scroll
+    area around it.  Notches are counted the way Qt counts them, so a positive
+    number is a wheel turned towards the top of the file.
+    """
+    where = QPoint(60, 40)
+    modifiers = (
+        Qt.KeyboardModifier.ControlModifier if ctrl else Qt.KeyboardModifier.NoModifier
+    )
+    for _ in range(abs(notches)):
+        event = QWheelEvent(
+            QPointF(where),
+            QPointF(editor.viewport().mapToGlobal(where)),
+            QPoint(0, 0),
+            QPoint(0, 120 if notches > 0 else -120),
+            Qt.MouseButton.NoButton,
+            modifiers,
+            Qt.ScrollPhase.NoScrollPhase,
+            False,
+        )
+        QApplication.sendEvent(editor.viewport(), event)
+
+
+def test_the_text_is_written_at_the_size_it_is_made_at(window):
+    """Until somebody asks otherwise, the size the editor asks for is the size
+    the file is shown at, and nothing has been written down for the asking."""
+    assert window.editor.font_size() == FONT_POINT_SIZE
+
+
+def test_a_turn_of_the_wheel_with_ctrl_makes_the_text_bigger_and_smaller(shown, qapp):
+    """The one thing the wheel is for here, and a point per notch is the least
+    that can be seen: two notches up and two back lands on the size it started at."""
+    shown.editor.setPlainText(lines_of(200))
+    was = shown.editor.font_size()
+
+    turn(shown.editor, 2)
+    qapp.processEvents()
+    assert shown.editor.font_size() == was + 2
+
+    turn(shown.editor, -2)
+    qapp.processEvents()
+    assert shown.editor.font_size() == was
+
+
+def test_a_turn_of_the_wheel_without_ctrl_only_moves_through_the_file(shown, qapp):
+    """Ctrl is what tells a turn that scrolls from a turn that resizes, and a
+    wheel is far too useful for scrolling to be given up: the file moves and the
+    letters are left exactly as they were."""
+    shown.editor.setPlainText(lines_of(400))
+    shown.editor.setFocus(Qt.FocusReason.OtherFocusReason)
+    shown.editor.verticalScrollBar().setValue(200)
+    qapp.processEvents()
+    was = shown.editor.font_size()
+
+    turn(shown.editor, -3, ctrl=False)
+    qapp.processEvents()
+
+    assert shown.editor.font_size() == was
+    assert shown.editor.verticalScrollBar().value() > 200  # down, where the wheel went
+
+
+def test_a_turn_of_the_wheel_with_ctrl_scrolls_nothing(shown, qapp):
+    """One turn, one thing: a file that resized and jumped down at the same time
+    would be read at a size nobody chose in a place nobody meant."""
+    shown.editor.setPlainText(lines_of(400))
+    shown.editor.verticalScrollBar().setValue(200)
+    qapp.processEvents()
+
+    turn(shown.editor, 3)
+    qapp.processEvents()
+
+    assert shown.editor.font_size() == FONT_POINT_SIZE + 3
+    assert shown.editor.verticalScrollBar().value() == 200
+
+
+def test_the_letters_stay_the_same_letters_however_big_they_are_turned(shown):
+    """Only the size is being asked about.  The values of a chump file are read
+    down their columns, so a wheel that changed the face along with the size
+    would move those columns out of step while looking like a magnifier."""
+    before = shown.editor.font()
+
+    turn(shown.editor, 9)
+
+    after = shown.editor.font()
+    assert after.family() == before.family()
+    assert after.fixedPitch() == before.fixedPitch()
+    assert after.pointSizeF() == before.pointSizeF() + 9
+
+
+def test_the_text_grows_and_shrinks_only_as_far_as_the_eye_can_use(shown):
+    """The bounds are part of the feature: a wheel that ran on without stopping
+    ends at letters too small to read and too big for a screen, and getting back
+    from either is a hundred turns of the wheel."""
+    turn(shown.editor, 400)
+    assert shown.editor.font_size() == FONT_MAX_POINTS
+    turn(shown.editor, -1)
+    assert shown.editor.font_size() == FONT_MAX_POINTS - 1
+
+    turn(shown.editor, -400)
+    assert shown.editor.font_size() == FONT_MIN_POINTS
+    turn(shown.editor, 1)
+    assert shown.editor.font_size() == FONT_MIN_POINTS + 1
+
+
+def test_the_numbers_are_still_level_with_their_lines_at_every_size(shown, qapp):
+    """The strip of numbers is measured and drawn in the same face as the text,
+    so it is laid out again at each size rather than left where eleven points put
+    it - which is what the reader means by line 12, at any size at all."""
+    shown.editor.setPlainText(lines_of(200))
+    in_sight = []
+    for points in (FONT_MIN_POINTS, FONT_POINT_SIZE, 24, FONT_MAX_POINTS):
+        shown.editor.set_font_size(points)
+        qapp.processEvents()
+        numbers = shown.editor.visible_lines()
+        assert len(numbers) > 1
+        for number, top, height in numbers:
+            if top >= 0:
+                line = shown.editor.cursorForPosition(QPoint(2, top + height // 2))
+                assert line.blockNumber() + 1 == number, f"{number} at {points} points"
+        in_sight.append(len(numbers))
+    assert in_sight == sorted(in_sight, reverse=True)  # bigger letters, fewer of them
+
+
+def test_the_room_for_the_numbers_grows_with_the_letters(shown, qapp):
+    """A four digit number written at forty points does not fit in the room it
+    needed at eleven, and the text has to be pushed sideways to make room for it
+    rather than have the number clipped."""
+    shown.editor.setPlainText(lines_of(400))
+    qapp.processEvents()
+    narrow = shown.editor.gutter_width()
+
+    turn(shown.editor, 25)
+    qapp.processEvents()
+
+    strip, text = shown.editor.gutter.geometry(), shown.editor.viewport().geometry()
+    assert shown.editor.gutter_width() > narrow
+    assert shown.editor.viewportMargins().left() == shown.editor.gutter_width()
+    assert strip.width() == shown.editor.gutter_width()
+    assert strip.right() < text.left()
+    assert strip.top() == text.top()
+    assert strip.height() == text.height()
+
+
+def test_a_tab_stands_four_spaces_whatever_the_size_of_the_text(shown):
+    """The spaces a tab stands for are the spaces of the size on screen, or the
+    columns a file is lined up in at one size come apart at another."""
+    for points in (FONT_MIN_POINTS, FONT_POINT_SIZE, FONT_MAX_POINTS):
+        shown.editor.set_font_size(points)
+        space = shown.editor.fontMetrics().horizontalAdvance(" ")
+        assert shown.editor.tabStopDistance() == pytest.approx(4 * space)
+
+
+def test_the_rows_are_written_at_the_size_the_text_is_at(qapp, window):
+    """The rows beside the text name containers that are read in the text, so a
+    second size in the same window reads as two programs stood side by side."""
+    window.show()
+    qapp.processEvents()
+    click(window, "View", "Treeview")
+    window.editor.setPlainText(NESTED)
+    qapp.processEvents()
+
+    turn(window.editor, 5)
+    qapp.processEvents()
+
+    rows, text = window.treeview.tree.font(), window.editor.font()
+    assert rows.pointSizeF() == text.pointSizeF() == FONT_POINT_SIZE + 5
+    assert rows.family() == text.family()
+
+
+def test_a_window_left_at_a_size_opens_the_next_one_at_it(window, settings):
+    """How big the text is wanted is a habit rather than a choice made again for
+    every file, so the next window starts where this one was left."""
+    turn(window.editor, 2)
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "font_size": FONT_POINT_SIZE + 2
+    }
+
+    again = ChumpWindow()
+    try:
+        assert again.editor.font_size() == FONT_POINT_SIZE + 2
+        assert again.treeview.tree.font().pointSizeF() == FONT_POINT_SIZE + 2
+    finally:
+        again.close()
+
+
+def test_the_size_is_written_down_beside_the_other_settings(window, settings):
+    """Three settings, one file: turning the letters adds its line and leaves the
+    panel and the wrap exactly as they were."""
+    click(window, "View", "Treeview")
+    click(window, "View", "Wrap lines")
+    turn(window.editor, 3)
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": True,
+        "wrap": True,
+        "font_size": FONT_POINT_SIZE + 3,
+    }
+
+    again = ChumpWindow()
+    try:
+        assert not again.treeview.isHidden()
+        assert again.editor.is_line_wrapped()
+        assert again.editor.font_size() == FONT_POINT_SIZE + 3
+    finally:
+        again.close()
+
+
+def test_a_size_that_is_not_a_number_counts_as_nothing_remembered(window, settings):
+    """``"font_size": "as big as you like"`` in a settings file is a mistake, and
+    text at the size it always starts at is a smaller surprise than text written
+    at a size nobody asked for."""
+    hand_written = {"font_size": "as big as you like"}
+    (settings / "settings.json").write_text(json.dumps(hand_written), encoding="utf-8")
+
+    again = ChumpWindow()
+    try:
+        assert again.editor.font_size() == FONT_POINT_SIZE
+    finally:
+        again.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == hand_written
+
+
+def test_a_size_beyond_the_bounds_is_brought_inside_them(window, settings):
+    """A file edited by hand can name any size; the text area keeps its own bounds
+    rather than trusting the file, and the size it ended up at is what gets
+    written back down."""
+    (settings / "settings.json").write_text(json.dumps({"font_size": 400}), encoding="utf-8")
+
+    again = ChumpWindow()
+    try:
+        assert again.editor.font_size() == FONT_MAX_POINTS
+    finally:
+        again.close()
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "font_size": FONT_MAX_POINTS
     }
 
 

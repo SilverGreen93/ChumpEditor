@@ -86,9 +86,11 @@ writes binary.
 ## GUI
 
 The main area is one rich text editor: the text form of a file in a fixed width
-font, coloured by keyword, with the lines numbered down the left. The colours are
-paint rather than content - undo only ever goes back over the text, the numbers
-are never part of it, and what is saved is plain text whatever a line looked like.
+font, coloured by keyword, with the lines numbered down the left. Ctrl and the
+mouse wheel over the text makes those letters bigger or smaller, and the size you
+left them at is waiting there next time. The colours are paint rather than
+content - undo only ever goes back over the text, the numbers are never part of
+it, and what is saved is plain text whatever a line looked like.
 
 - Name a `.chump`, `.cdp` or `.txt` on the command line, or drop one anywhere on
   the window (including onto the text), and it opens straight in the editor; a
@@ -111,6 +113,9 @@ are never part of it, and what is saved is plain text whatever a line looked lik
   wide for the text area stand over several rows inside it, instead of running on
   past the edge. See [Tree of containers](#tree-of-containers) and
   [Wrap lines](#wrap-lines).
+- Ctrl held while the mouse wheel turns over the text sizes the letters, one point
+  a notch, and that size is remembered. A wheel without Ctrl only scrolls. See
+  [The size of the text](#the-size-of-the-text).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
@@ -252,8 +257,8 @@ them would join rows that are not joined. The file's own level is left blank the
 same way, since only one file is on screen at a time.
 
 The rows are written in the same fixed-width font, at the same size, as the text
-beside them, so the tree reads as part of the same window rather than a second
-program's.
+beside them - and at that size again whenever the text is resized - so the tree reads
+as part of the same window rather than a second program's.
 
 Windows draws a tree with triangles and no lines, so the lines are drawn by the
 panel itself, and each level stands half as far behind the one above it as
@@ -285,9 +290,9 @@ container - the name deleted since the rows were written - is left alone rather
 than selecting whatever stands there now.
 
 Whether the panel stands there is remembered for the next time the program starts:
-ticking it writes `"treeview": true` and unticking it writes `false`, and **Wrap
-lines** is written down the same way as `"wrap"`, both in one small file beside the
-list of recent files,
+ticking it writes `"treeview": true` and unticking it writes `false`. **Wrap
+lines** is written down the same way as `"wrap"`, and the size the text was left at
+as `"font_size"`; all three live in one small file beside the list of recent files,
 
 ```
 %APPDATA%\ChumpEditor\settings.json    (Windows)
@@ -327,6 +332,35 @@ a *Syntax check* names, or the status bar names after a search, is the same line
 either way. Fewer lines fit in the window once they wrap, and the strip of numbers
 keeps level with the text area as it grows taller by the height of the sideways bar
 it no longer needs.
+
+### The size of the text
+
+Hold Ctrl and turn the mouse wheel over the text and the letters grow a point a
+notch, or shrink one. A notch is the least the eye is asked to notice, and a file is
+not read by turning a wheel a hundred times, so that is the step. A turn without
+Ctrl does what it always did and moves through the file; a turn with it sizes the
+letters without also jumping down the page, since one turn is one thing.
+
+The size stops at 6 points and at 48. Below the first nobody can read the text,
+above the second a line of a config file stops fitting on a screen, and a wheel that
+ran on past either leaves a size that has to be turned back through forty notches to
+be worth anything.
+
+Everything measured off the letters follows the size. The numbers down the left are
+written in the same face as the text, so the room they stand in is measured again and
+they stay level with the lines they number at every size. A tab still stands four
+spaces wide, in the spaces of the size on screen, so the columns a file is lined up
+in stay lined up. The rows of the tree beside the text are written at it too, because
+one face at two sizes reads as two programs' windows stood side by side. The face
+itself is never changed - only the size is asked about - and it stays fixed width,
+because the values of a line are read down their columns.
+
+The size is written down as `"font_size"`, beside the `"treeview"` and `"wrap"`
+described under [Tree of containers](#tree-of-containers), so the next window opens
+with its text as big as the last one left it. A window that has remembered nothing
+starts at 11 points and writes no settings file that nobody changed; a size named
+outside the bounds is brought inside them, and a value that is not a number at all
+counts as nothing remembered.
 
 ### Syntax check
 

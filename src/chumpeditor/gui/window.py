@@ -78,6 +78,9 @@ TREEVIEW_SETTING = "treeview"
 #: what the settings file calls the wrapping of long lines, true while they bend
 WRAP_SETTING = "wrap"
 
+#: what the settings file calls the size of the text, in points
+FONT_SIZE_SETTING = "font_size"
+
 
 @dataclass(frozen=True)
 class WriteForm:
@@ -140,6 +143,14 @@ class ChumpWindow(QMainWindow):
         self.treeview.picked.connect(self.reveal_line)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.treeview)
 
+        # when the size of the text changes - turned by Ctrl and the wheel, or
+        # read back from the window before this one - two things follow from that
+        # one moment: the rows beside the text are written at the new size, since
+        # they wear the same letters, and the size is written down, since it is a
+        # habit rather than a choice made again for each file
+        self.editor.font_size_changed.connect(self.treeview.set_font_size)
+        self.editor.font_size_changed.connect(self._remember_font_size)
+
         self.setWindowTitle(APP_TITLE)
         icon = window_icon()
         if icon:
@@ -170,6 +181,7 @@ class ChumpWindow(QMainWindow):
         self._refresh_treeview()
         self._restore_treeview()
         self._restore_line_wrap()
+        self._restore_font_size()
 
         if paths:
             self.open_paths(paths)
@@ -489,7 +501,7 @@ class ChumpWindow(QMainWindow):
                         return item
         raise LookupError(f"the View menu has no {label} item")
 
-    # -- how the lines are shown ----------------------------------------------------
+    # -- how the text is shown -------------------------------------------------
     def toggle_line_wrap(self, on: bool | None = None) -> None:
         """View > Wrap lines: bend the lines too long for the text area, or let
         them run on past its edge.
@@ -527,6 +539,31 @@ class ChumpWindow(QMainWindow):
             return
         self.editor.set_line_wrap(True)
         self._view_item("Wrap lines").setChecked(True)
+
+    def _remember_font_size(self, points: float) -> None:
+        """Write down the size the text was just changed to.
+
+        Asked for by the text area as it changes, so every way of changing it -
+        the wheel over the text, and a size read back from the window before this
+        one - is remembered the same way, and there is no second door to forget.
+        """
+        self.settings.set(FONT_SIZE_SETTING, points)
+
+    def _restore_font_size(self) -> None:
+        """Write the text at the size the last session left it.
+
+        The size the text area asks for itself is what it is written at when
+        nothing was remembered, so in that case nothing is applied here and
+        nothing is written back either - a program that rewrote its settings on
+        every start would leave a file nobody had changed.  A size outside the
+        bounds the text area allows is brought inside them by the text area
+        rather than argued with here, and a value that is not a number at all - a
+        settings file edited by hand - counts as nothing remembered.
+        """
+        points = self.settings.get(FONT_SIZE_SETTING, None, as_=float)
+        if points is None:
+            return
+        self.editor.set_font_size(points)
 
     def _tweak(
         self,

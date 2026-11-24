@@ -44,6 +44,15 @@ PREFERRED_MONO = (
 
 FONT_POINT_SIZE = 11
 
+#: how far one turn of a Ctrl+wheel moves the size, in points: one point per
+#: notch is the smallest change that can be seen, and a file is not read by
+#: turning the wheel a hundred times
+FONT_STEP = 1
+#: the bounds the text is never taken past, in points: below the first nobody can
+#: read it, above the second a line of a config file stops fitting on a screen
+FONT_MIN_POINTS = 6
+FONT_MAX_POINTS = 48
+
 #: blank either side of a number, in pixels, so nothing is jammed against a rule
 GUTTER_SIDE = 8
 #: the smallest the strip is ever allowed to be, in digits, so a file growing
@@ -89,13 +98,17 @@ class RichTextEditor(QTextEdit):
     files_dropped = pyqtSignal(list)
     #: a file drag is over the text (True) or has left it (False)
     files_dragging = pyqtSignal(bool)
+    #: the size of the text, in points, has been changed to this - Ctrl and the
+    #: wheel, or a size remembered from the last time - so the window can write it
+    #: down and the rows beside the text can be written at it too
+    font_size_changed = pyqtSignal(float)
 
     def __init__(self, parent=None, theme: Theme | None = None) -> None:
         super().__init__(parent)
         self.setAcceptRichText(True)  # colours and attributes stay in the document
         self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setFont(code_font())
-        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
+        self._set_tab_stops()
         self.setAcceptDrops(True)  # a file lands here as often as on the frame
         self.highlighter = ThemeHighlighter(
             self.document(), theme or default_theme(), self.on_dark_background()
@@ -285,6 +298,58 @@ class RichTextEditor(QTextEdit):
     def is_line_wrapped(self) -> bool:
         """Whether long lines are bent to the width of the area, or run on past it."""
         return self.lineWrapMode() == QTextEdit.LineWrapMode.WidgetWidth
+
+    # -- the size of the text -------------------------------------------------
+    def font_size(self) -> float:
+        """The size the text is written at, in points."""
+        return self.font().pointSizeF()
+
+    def set_font_size(self, points: float) -> None:
+        """Write the text at ``points``, never past what the area can show.
+
+        The face is left alone: the text is fixed-width because the values of a
+        config line are read down their columns, and a size says nothing about
+        that.  Everything measured off the letters follows the size - the tab
+        stops, which are four spaces of whatever is on screen, and the room for
+        the line numbers, which is measured in the same face as the numbers are
+        written in.
+
+        The size is said out loud as it is set, because remembering it is the
+        window's business and matching the rows beside the text is the panel's;
+        the text area keeps no size of its own.
+        """
+        wanted = min(max(points, FONT_MIN_POINTS), FONT_MAX_POINTS)
+        if wanted == self.font_size():
+            return
+        font = self.font()
+        font.setPointSizeF(wanted)
+        self.setFont(font)
+        self._set_tab_stops()
+        self._lines_changed()
+        self.font_size_changed.emit(wanted)
+
+    def _set_tab_stops(self) -> None:
+        """A tab stands four spaces wide, in the size the text is at right now."""
+        self.setTabStopDistance(4 * self.fontMetrics().horizontalAdvance(" "))
+
+    def wheelEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        """Ctrl and the wheel over the text makes the letters bigger or smaller.
+
+        How large the letters are is asked about a text area more often than
+        almost anything else about it, and the wheel is already under the hand
+        doing the reading, so it is not kept behind a menu.  Ctrl is what keeps
+        it out of the way of the plain scrolling every other turn does, and a
+        turn without it goes straight back to Qt.  A turn with it is accepted
+        here instead of being left to travel on, so the file is either resized or
+        scrolled by one turn, never both at once.
+        """
+        if not event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            super().wheelEvent(event)
+            return
+        notch = event.angleDelta().y()
+        if notch:
+            self.set_font_size(self.font_size() + (FONT_STEP if notch > 0 else -FONT_STEP))
+        event.accept()
 
     def apply_rewrites(self, rewrites: Iterable[Rewrite]) -> None:
         """Cut out stretches of the text and write their replacements in.
