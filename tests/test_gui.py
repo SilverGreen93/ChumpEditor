@@ -45,7 +45,15 @@ from PyQt6.QtWidgets import (  # noqa: E402
 from PyQt6.QtTest import QTest  # noqa: E402
 
 from chumpeditor import __version__, recent, settings as kept  # noqa: E402
-from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file  # noqa: E402
+from chumpeditor.chump import (  # noqa: E402
+    ChumpError,
+    load_chump,
+    pack_tag_tree,
+    parse_chump,
+    parse_tdx,
+    parse_text,
+    read_text_file,
+)
 from chumpeditor.document import (  # noqa: E402
     ALL_SUFFIXES,
     CHUMP_GROUP,
@@ -291,6 +299,36 @@ def test_opening_a_txt_shows_the_file_itself(window, tmp_path):
     source = copy("config3.txt", tmp_path)
     window.open_path(source)
     assert text_of(window.editor) == flat(read_text_file(source))
+
+
+def test_opening_a_tdx_shows_both_chump_blocks(window, tmp_path, tdx_of):
+    credentials = parse_text('0\n{\n  cd-key "abcd-efgh"\n}\n').tags
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    raw = tdx_of(
+        pack_tag_tree(credentials),
+        pack_tag_tree(settings),
+    )
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(raw)
+    window.open_path(source)
+    assert parse_text(as_file_text(text_of(window.editor))) == parse_tdx(raw)
+    assert window.path == source
+
+
+def test_an_empty_credentials_block_shows_only_the_settings(window, tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+    assert parse_text(as_file_text(text_of(window.editor))).tags == list(settings)
+
+
+def test_a_tdx_with_a_broken_block_is_a_dialog_not_a_crash(window, dialogs, tmp_path, tdx_of):
+    broken = tmp_path / "broken.tdx"
+    broken.write_bytes(tdx_of(b"", b"", version=50))
+    assert window.open_file(broken) is False
+    assert dialogs and dialogs[0][0] == "error"
+    assert "obfuscated" in dialogs[0][2]
 
 
 def test_opening_leaves_the_file_where_it_is(window, tmp_path):
@@ -3320,6 +3358,50 @@ def test_saving_writes_the_file_being_edited_and_takes_the_star_off(window, tmp_
     assert window.windowTitle() == f"config1.chump - {APP_TITLE}"
     assert window.statusBar().currentMessage() == "Saved config1.chump"
     assert dialogs == []  # a save nobody argued with needs no comment
+
+
+def test_saving_an_opened_tdx_writes_a_plain_chump(window, picks, tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+    picks.choose.append(str(tmp_path / "settings.chump"))
+
+    assert window.save() == tmp_path / "settings.chump"
+    assert load_chump(tmp_path / "settings.chump") == parse_tdx(source.read_bytes())
+    assert window.path == tmp_path / "settings.chump"
+    assert window.windowTitle() == f"settings.chump - {APP_TITLE}"
+    assert window.statusBar().currentMessage() == "Saved settings.chump"
+    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
+
+
+def test_exporting_an_opened_tdx_writes_its_text(window, picks, tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+    picks.choose.append(str(tmp_path / "out.txt"))
+
+    assert window.export() == tmp_path / "out.txt"
+    assert read_as_written(tmp_path / "out.txt") == as_file_text(text_of(window.editor))
+    assert window.path == tmp_path / "out.txt"
+    assert window.statusBar().currentMessage() == "Exported out.txt"
+    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
+
+
+def test_a_tdx_save_dialog_offers_only_the_chump_form(window, picks, tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+    picks.choose.append(str(tmp_path / "settings.chump"))
+    window.save(ask=True)
+    which, title, start, filters = picks.asked[-1]
+    assert (which, title) == ("save", "Save chump")
+    assert start == str(tmp_path / "assets.chump")
+    assert filters == filter_string(CHUMP_GROUP)
+    window.export(ask=True)
+    assert picks.asked[-1][3] == filter_string(TEXT_GROUP)
 
 
 def test_saving_an_untitled_editor_asks_where_the_file_goes(window, picks, tmp_path):

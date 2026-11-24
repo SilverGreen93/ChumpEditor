@@ -138,7 +138,7 @@ render
 The database starts right after the last byte of CHUMP block #2 and runs to the end of the file. It is a **proprietary binary format**, not SQLite or any other standard database container. For now, treat it as a black box. The notes below are observations only, not a specification.
 
 * It starts with a UInt32, e.g. `63 5D 0C 00` (810,339). It is probably a count or ID counter. It does **not** match the number of asset records found.
-* Records are variable-length. Each begins with an **8-byte KUID stored content-id first, then user-id**. This is the reverse of the CHUMP `0D` encoding (the `revKuid` helper in `Form1.vb` converts between the two). For example, `06 F5 2C 01 0B 02 00 00` = `<kuid:523:19723526>`.
+* Records are variable-length. Each begins with an **8-byte KUID stored content-id first, then user-id**. This is the reverse of the CHUMP `0D` encoding. For example, `06 F5 2C 01 0B 02 00 00` = `<kuid:523:19723526>`.
 * Strings use length prefixes, not null terminators. Short fields use a 1-byte length (category class `TX;ENV;AQUA;?EW`, asset name `Big Ripples`). Longer fields use a 4-byte length (the asset's location, e.g. `fld:$(builtin)/base/content/kuid 523 19723526|`).
 * Near the end of the database there are a few embedded CHUMP blocks (`ACS$`, standard header). They hold per-asset metadata such as `locally-modified`, `asset-data` and `client-timestamp`. TANE has 6 of them and TRS22 has 10.
 * After the asset records, the file ends in long runs of fixed-size entries (pairs of 32-bit values). These look like dependency or index tables.

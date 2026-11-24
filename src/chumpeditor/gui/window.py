@@ -4,7 +4,8 @@ There is no queue here and nothing is converted beside it any more.  A file
 arrives - named on the command line, dropped on the window, picked in the Open
 dialog or out of the list of files opened lately - its text form goes into the
 editor, and the window's title says which file that is and whether it has been
-changed since it was written.
+changed since it was written.  An assets.tdx opens with both of its settings
+blocks decoded into the text area at once.
 
 Writing the file back is the window's decision, not the editor's: *Save chump*
 packs the text into a binary file and *Export txt* writes the text form, and
@@ -235,7 +236,7 @@ class ChumpWindow(QMainWindow):
         usable = [path for path in paths if is_readable(path)]
         if not usable:
             if paths:
-                self.say("Nothing to open: no .chump, .cdp or .txt among them")
+                self.say("Nothing to open: no .chump, .cdp, .tdx or .txt among them")
             return None
         if not self._ok_to_replace():
             return None

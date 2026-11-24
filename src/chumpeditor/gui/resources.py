@@ -51,16 +51,18 @@ UNTITLED = "Untitled"
 SUMMARY = "Trainz config editor"
 DESCRIPTION = (
     "Opens a Trainz config in either form - the binary .chump/.cdp container "
-    "or the indented text form - lets you edit it, and writes it back as "
-    "either. The text follows the layout Trainz uses: UTF-8 with a BOM, CRLF "
-    "line endings, values from column 40."
+    "or the indented text form - or the two settings blocks of an assets.tdx, "
+    "lets you edit it, and writes it back as either. A TDX opens with both of "
+    "its CHUMP blocks in one text area and saves as a plain .chump. The text "
+    "follows the layout Trainz uses: UTF-8 with a BOM, CRLF line endings, "
+    "values from column 40."
 )
 AUTHOR = "SilverGreen93"
 #: the copyright line, in the About box and wherever else the app signs itself
 CREDIT = f"© {datetime.date.today().year} {AUTHOR}"
 
 #: what the status bar says while a file is being dragged over the window
-DROP_HINT = "Drop a .chump, .cdp or .txt file to open it"
+DROP_HINT = "Drop a .chump, .cdp, .tdx or .txt file to open it"
 
 #: the icon, bundled next to the code (source tree) or into the exe
 ICON_FILE = "chumpeditor.ico"

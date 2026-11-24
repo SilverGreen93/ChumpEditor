@@ -3,10 +3,12 @@
 Deliberately free of Qt, so the rules the window follows can be read and
 tested on their own:
 
-* opening a ``.chump`` or ``.cdp`` puts its text form in the editor, opening a
-  ``.txt`` puts the file in as it stands;
+* opening a ``.chump`` or ``.cdp`` puts its text form in the editor, opening an
+  ``assets.tdx`` expands both of its CHUMP blocks into one text form, and
+  opening a ``.txt`` puts the file in as it stands;
 * saving writes the editor's text back as a binary chump, whatever the name
-  the file has now;
+  the file has now - a TDX that was opened is saved as a plain chump, since the
+  asset database cannot be rebuilt from the text;
 * exporting writes the editor's text as a text file laid out the way the
   original expander wrote one: UTF-8 with a BOM, CRLF line endings;
 * both of them start with ``check_text``, so text the format would misread -
@@ -23,11 +25,13 @@ from pathlib import Path
 from .chump import (
     CHUMP_SUFFIXES,
     TEXT_SUFFIXES,
+    TDX_SUFFIXES,
     ChumpError,
     check_text,
     dump_chump,
     find_problems,
     parse_chump,
+    parse_tdx,
     read_text_file,
     render_text,
 )
@@ -38,6 +42,8 @@ __all__ = [
     "CHUMP_GROUP",
     "CHUMP_SUFFIXES",
     "FILTERS",
+    "TDX_GROUP",
+    "TDX_SUFFIXES",
     "TEXT_GROUP",
     "TEXT_SUFFIXES",
     "as_file_text",
@@ -51,15 +57,17 @@ __all__ = [
     "suggested_path",
 ]
 
-#: every extension the editor takes, chump forms first
-ALL_SUFFIXES = CHUMP_SUFFIXES + TEXT_SUFFIXES
+#: every extension the editor takes, binary forms first
+ALL_SUFFIXES = CHUMP_SUFFIXES + TDX_SUFFIXES + TEXT_SUFFIXES
 
 #: the dialog groups, named so a save dialog can offer one form on its own
 ALL_GROUP = ("All supported files", ALL_SUFFIXES)
 CHUMP_GROUP = ("Chump files", CHUMP_SUFFIXES)
+TDX_GROUP = ("TDX files", TDX_SUFFIXES)
 TEXT_GROUP = ("Text files", TEXT_SUFFIXES)
 
-FILTERS = (ALL_GROUP, CHUMP_GROUP, TEXT_GROUP)
+# a TDX is read but never written: saving always packs into a .chump
+FILTERS = (ALL_GROUP, CHUMP_GROUP, TDX_GROUP, TEXT_GROUP)
 
 
 def filter_string(*groups: tuple[str, tuple[str, ...]]) -> str:
@@ -84,13 +92,16 @@ def is_readable(path: str | Path) -> bool:
 def read_document(path: str | Path) -> str:
     """The text the editor shows for a file, whichever form it is in.
 
-    A binary chump is expanded first; a text file is read as it stands, so the
-    spacing a file already has survives an open-and-save round trip.
+    A binary chump is expanded first; a TDX gives up both of its CHUMP blocks
+    as one tree; a text file is read as it stands, so the spacing a file already
+    has survives an open-and-save round trip.
     """
     source = Path(path)
     suffix = source.suffix.lower()
     if suffix in CHUMP_SUFFIXES:
         return render_text(parse_chump(source.read_bytes()))
+    if suffix in TDX_SUFFIXES:
+        return render_text(parse_tdx(source.read_bytes()))
     if suffix in TEXT_SUFFIXES:
         return read_text_file(source)
     raise ChumpError(

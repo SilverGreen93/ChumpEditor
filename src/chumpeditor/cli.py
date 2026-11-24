@@ -2,9 +2,10 @@
 
 With no arguments the GUI launches; with one or more paths the app runs in CLI
 mode and converts every file to the other form beside it, which direction
-being decided by the extension: a ``.chump`` (or ``.cdp``) file is expanded
-into ``.txt``, a ``.txt`` file is packed back into ``.chump``.  That is what
-the original expander's single button did, only in both directions.
+being decided by the extension: a ``.chump`` (or ``.cdp``) file, or an
+``assets.tdx`` with its two CHUMP blocks, is expanded into ``.txt``; a ``.txt``
+file is packed back into ``.chump``.  That is what the original expander's
+single button did, only in both directions.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 
 from .chump import (
     CHUMP_SUFFIXES,
+    TDX_SUFFIXES,
     TEXT_SUFFIXES,
     ChumpError,
     convert_file,
@@ -31,12 +33,12 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(
         prog="chumpeditor",
-        description="Convert Trainz .chump files to and from their text form.",
+        description="Convert Trainz .chump/.cdp/.tdx files to and from their text form.",
     )
     parser.add_argument(
         "paths",
         nargs="*",
-        help=".chump files to expand and/or .txt files to pack back",
+        help=".chump/.cdp/.tdx files to expand and/or .txt files to pack back",
     )
     parser.add_argument(
         "-o",
@@ -98,7 +100,7 @@ def run_cli(
 def verb(path: Path) -> str:
     """What this direction is called, for the message."""
     suffix = path.suffix.lower()
-    if suffix in CHUMP_SUFFIXES:
+    if suffix in CHUMP_SUFFIXES or suffix in TDX_SUFFIXES:
         return "expanded"
     if suffix in TEXT_SUFFIXES:
         return "packed"

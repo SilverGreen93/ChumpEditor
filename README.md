@@ -3,11 +3,13 @@
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/SilverGreen93/ChumpEditor)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) [![Downloads (Latest Release)](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/latest/total?label=latest%20release%20downloads)](https://github.com/SilverGreen93/ChumpEditor/releases/latest) ![GitHub all releases](https://img.shields.io/github/downloads/SilverGreen93/ChumpEditor/total?label=total%20downloads)
 
 Editor for `config.chump` or `config.txt` files.
+Can also open `.cdp` and `assets.tdx` files, decoding both CHUMP blocks of a `.tdx` into the editor.
 
 Features:
 
 - Can convert Trainz `.chump` files - the binary form of an asset's `config.txt` - to and from their readable text form.
-- Can be used directly as an editor for config.txt/config.chump files
+- Can be used directly as an editor for `config.txt`/`config.chump` files
+- Can open `.cdp` files or `assets.tdx` files, save them as a plain `.chump` file, or export them to `.txt`.
 - Contains tweaks to modernize obsolete config files (see below)
 - Offers syntax highlighting and line numbers
 - Syntax checking for files
@@ -17,7 +19,8 @@ Features:
 ![screenshot](assets/screenshot.png)
 
 For CLI, the extension picks the direction: a `.chump` (or `.cdp`) is expanded into
-`.txt`, a `.txt` is packed back into `.chump`. The text that comes out is laid
+`.txt`, a `.tdx` is expanded into `.txt` (both CHUMP blocks together), a `.txt` is
+packed back into `.chump`. The text that comes out is laid
 out the way Trainz writes it - UTF-8 with a BOM, CRLF line endings, values
 starting on column 40 - with one addition of our own: every container is set off
 from the tags beside it with a blank line, at the top of the file and as far down
@@ -90,9 +93,9 @@ left them at is waiting there next time. The colours are paint rather than
 content - undo only ever goes back over the text, the numbers are never part of
 it, and what is saved is plain text whatever a line looked like.
 
-- Name a `.chump`, `.cdp` or `.txt` on the command line, or drop one anywhere on
+- Name a `.chump`, `.cdp`, `.tdx` or `.txt` on the command line, or drop one anywhere on
   the window (including onto the text), and it opens straight in the editor; a
-  binary chump is expanded for display and nothing is written until you save.
+  binary chump, cdp or tdx is expanded for display and nothing is written until you save.
 - The title carries the file's name and a `*` while it has changes that are
   not on disk.
 - Work that is not on disk is asked about before anything replaces it - opening
@@ -101,7 +104,7 @@ it, and what is saved is plain text whatever a line looked like.
   then talked out of stops the whole thing.
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
-- **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp` and `.txt`), Recent
+- **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp`, `.tdx` and `.txt`), Recent
   files (the ten opened last, and Clear list), Save chump (Ctrl+S), Save chump
   as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),

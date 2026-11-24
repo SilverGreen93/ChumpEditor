@@ -11,9 +11,20 @@ from pathlib import Path
 
 import pytest
 
-from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file
+from chumpeditor.chump import (
+    ChumpError,
+    load_chump,
+    pack_tag_tree,
+    parse_chump,
+    parse_text,
+    parse_tdx,
+    read_text_file,
+)
 from chumpeditor.document import (
     ALL_SUFFIXES,
+    CHUMP_SUFFIXES,
+    TDX_SUFFIXES,
+    TEXT_SUFFIXES,
     filter_string,
     is_readable,
     read_document,
@@ -45,12 +56,17 @@ def read_as_written(path: Path) -> str:
 # what can be opened
 # ---------------------------------------------------------------------------
 def test_every_form_the_editor_takes_is_listed_once():
-    assert ALL_SUFFIXES == (".chump", ".cdp", ".txt")
+    assert ALL_SUFFIXES == CHUMP_SUFFIXES + TDX_SUFFIXES + TEXT_SUFFIXES
+    assert ALL_SUFFIXES == (".chump", ".cdp", ".tdx", ".txt")
 
 
-def test_files_of_both_forms_are_readable(tmp_path):
+def test_files_of_all_forms_are_readable(tmp_path, tdx_of):
     for sample in ("config1.chump", "config2.txt"):
         assert is_readable(copy(sample, tmp_path))
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    tdx = tmp_path / "assets.tdx"
+    tdx.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    assert is_readable(tdx)
 
 
 def test_a_folder_or_a_stranger_is_not_readable(tmp_path):
@@ -61,10 +77,11 @@ def test_a_folder_or_a_stranger_is_not_readable(tmp_path):
     assert not is_readable(tmp_path / "gone.chump")
 
 
-def test_the_open_dialog_offers_all_three_extensions_then_each_form():
+def test_the_open_dialog_offers_every_extension_then_each_form():
     assert filter_string() == (
-        "All supported files (*.chump *.cdp *.txt)"
+        "All supported files (*.chump *.cdp *.tdx *.txt)"
         ";;Chump files (*.chump *.cdp)"
+        ";;TDX files (*.tdx)"
         ";;Text files (*.txt)"
     )
 
@@ -113,6 +130,59 @@ def test_a_chump_that_is_not_a_chump_is_the_codecs_complaint(tmp_path):
     with pytest.raises(ChumpError) as exc:
         read_document(broken)
     assert "not a chump file" in str(exc.value)
+
+
+def test_a_tdx_that_is_not_a_tdx_says_which_file_it_is(tmp_path):
+    broken = tmp_path / "broken.tdx"
+    broken.write_bytes(b"SQLite format 3\x00")
+    with pytest.raises(ChumpError) as exc:
+        read_document(broken)
+    assert "not a tdx file" in str(exc.value)
+
+
+def test_opening_a_tdx_shows_both_chump_blocks(tmp_path, tdx_of):
+    credentials = parse_text('0\n{\n  cd-key "abcd-efgh"\n}\n').tags
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    raw = tdx_of(
+        pack_tag_tree(credentials),
+        pack_tag_tree(settings),
+    )
+    source.write_bytes(raw)
+    assert parse_text(read_document(source)) == parse_tdx(raw)
+    assert [tag.name for tag in parse_text(read_document(source)).tags] == [
+        "0", *[tag.name for tag in settings]
+    ]
+
+
+def test_an_empty_credentials_block_is_left_out_of_the_text(tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    assert parse_text(read_document(source)).tags == list(settings)
+
+
+def test_saving_an_opened_tdx_writes_a_plain_chump(tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    text = read_document(source)
+    target = save_chump(text, tmp_path / "settings.chump")
+    assert parse_chump(target.read_bytes()).tags == list(settings)
+    assert not target.suffix == ".tdx"  # saved as a chump, never another tdx
+
+
+def test_exporting_an_opened_tdx_writes_its_text(tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    target = save_text(read_document(source), tmp_path / "assets.txt")
+    assert read_document(source) == read_text_file(target)
+
+
+def test_a_tdx_name_suggests_a_chump_not_another_tdx():
+    assert suggested_path(Path("assets.tdx"), ".chump") == Path("assets.chump")
+    assert suggested_path(Path("assets.tdx"), ".txt") == Path("assets.txt")
 
 
 # ---------------------------------------------------------------------------

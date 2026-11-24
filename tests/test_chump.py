@@ -14,6 +14,9 @@ import pytest
 from chumpeditor.chump import (
     MAGIC,
     NAME_ENCODING,
+    TDX_EDITION_VERSION,
+    TDX_MAGIC,
+    TDX_PLAIN_VERSION,
     VALUE_COLUMN,
     ChumpError,
     Kuid,
@@ -37,6 +40,7 @@ from chumpeditor.chump import (
     parse_kuid,
     parse_tag_tree,
     parse_text,
+    parse_tdx,
     read_text_file,
     render_text,
 )
@@ -1260,3 +1264,124 @@ def test_a_file_that_is_neither_form_is_refused(tmp_path):
     source.write_text("hello")
     with pytest.raises(ChumpError, match=r"not a chump file \('.chump/.cdp'\) and not a text file"):
         convert_file(source)
+
+
+# --------------------------------------------------------------------------
+# the TDX layout: header, two CHUMP blocks, then the asset database
+# --------------------------------------------------------------------------
+def tdx_of(first: bytes, second: bytes, *, version: int = TDX_PLAIN_VERSION,
+           edition: bytes = b"") -> bytes:
+    """Build an ``assets.tdx`` exactly as the format spec lays it out.
+
+    ``first`` and ``second`` are the contents of the two CHUMP blocks; each
+    gets an ordinary CHUMP header.  A few bytes stand in for the database, so
+    a reader also has to stop when the second block ends.
+    """
+    prefix = bytes([len(edition)]) + edition if version >= TDX_EDITION_VERSION else b""
+    body = prefix + file_of(first) + file_of(second) + b"\x00\x00\x00\x00"
+    return TDX_MAGIC + struct.pack("<II", version, 12 + len(body)) + body
+
+
+def test_a_tdx_opens_with_the_tags_of_both_blocks_read_as_one_tree():
+    credentials = Tag.container("0", [Tag.value_tag("cd-key", "abcd-efgh")])
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    data = tdx_of(
+        pack_tag_tree((credentials,)),
+        pack_tag_tree(settings),
+    )
+    root = parse_tdx(data)
+    assert root.tags == [credentials, *settings]
+
+
+def test_an_empty_first_block_contributes_no_tags():
+    # TANE keeps no credentials in block #1, so only the settings are shown
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    root = parse_tdx(tdx_of(b"", pack_tag_tree(settings)))
+    assert root.tags == list(settings)
+
+
+def test_an_empty_second_block_is_read_as_a_container():
+    credentials = Tag.container("0", [Tag.value_tag("cd-key", "abcd-efgh")])
+    root = parse_tdx(tdx_of(pack_tag_tree((credentials,)), b""))
+    assert root.tags == [credentials]
+
+
+def test_a_trs22_tdx_skips_the_edition_string_before_block_one():
+    credentials = Tag.container("0", [Tag.value_tag("cd-key", "abcd-efgh")])
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    data = tdx_of(
+        pack_tag_tree((credentials,)),
+        pack_tag_tree(settings),
+        version=TDX_EDITION_VERSION,
+        edition=b"standard-45",
+    )
+    assert data[12:24] == bytes([11]) + b"standard-45"
+    assert data[24:28] == MAGIC
+    assert parse_tdx(data).tags == [credentials, *settings]
+
+
+def test_a_version_with_an_edition_string_and_no_block_one_still_opens():
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    data = tdx_of(b"", pack_tag_tree(settings),
+                  version=TDX_EDITION_VERSION, edition=b"standard-45")
+    assert parse_tdx(data).tags == list(settings)
+
+
+def test_an_obfuscated_tdx_is_refused():
+    with pytest.raises(ChumpError, match="obfuscated"):
+        parse_tdx(tdx_of(b"", b"", version=50))
+
+
+def test_a_short_tdx_header_is_refused():
+    with pytest.raises(ChumpError, match="too short to be a tdx file"):
+        parse_tdx(TDX_MAGIC[:8])
+
+
+def test_a_file_with_another_magic_is_not_a_tdx():
+    with pytest.raises(ChumpError, match="not a tdx file"):
+        parse_tdx(b"SQLite format 3\x00" + b"\x00" * 32)
+
+
+def test_a_tdx_with_a_truncated_edition_string_is_refused():
+    data = tdx_of(b"", b"", version=TDX_EDITION_VERSION, edition=b"standard")
+    with pytest.raises(ChumpError, match="edition string is truncated"):
+        parse_tdx(data[:18])
+
+
+def test_a_tdx_with_a_truncated_block_header_is_refused():
+    data = tdx_of(b"", b"", version=TDX_PLAIN_VERSION)
+    with pytest.raises(ChumpError, match="header truncated"):
+        parse_tdx(data[:20])
+
+
+def test_a_tdx_with_a_missing_block_signature_is_refused():
+    data = tdx_of(b"", b"", version=TDX_PLAIN_VERSION)
+    broken = data[:12] + b"XXXX" + data[16:]
+    with pytest.raises(ChumpError, match="no 'ACS\\$' signature"):
+        parse_tdx(broken)
+
+
+def test_a_tdx_with_a_block_running_past_the_end_is_refused():
+    data = tdx_of(b"", b"", version=TDX_PLAIN_VERSION)
+    broken = bytearray(data)
+    struct.pack_into("<I", broken, 24, 0xFFFF)  # block #1's declared length
+    with pytest.raises(ChumpError, match="runs past the end"):
+        parse_tdx(bytes(broken))
+
+
+def test_a_tdx_becomes_one_text_file_beside_it(tmp_path):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    target = convert_file(source)
+    assert target == tmp_path / "assets.txt"
+    assert parse_text(read_as_written(target)) == parse_tdx(source.read_bytes())
+
+
+def test_a_tdx_can_be_written_to_a_chosen_text_file(tmp_path):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    target = tmp_path / "out.txt"
+    assert convert_file(source, target) == target
+    assert parse_text(read_as_written(target)) == parse_tdx(source.read_bytes())

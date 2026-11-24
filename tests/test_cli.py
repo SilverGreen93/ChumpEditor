@@ -13,7 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from chumpeditor.chump import load_chump, load_text, pack_chump, parse_text, read_text_file
+from chumpeditor.chump import (
+    load_chump,
+    load_text,
+    pack_chump,
+    pack_tag_tree,
+    parse_chump,
+    parse_tdx,
+    parse_text,
+    read_text_file,
+)
 from chumpeditor.cli import main, run_cli, text_of, verb
 
 SAMPLES = Path(__file__).parent / "test_files"
@@ -118,6 +127,65 @@ def test_a_cdp_file_expands_like_a_chump(tmp_path):
     source.write_bytes((SAMPLES / "config1.chump").read_bytes())
     assert main([str(source)]) == 0
     assert (tmp_path / "config1.txt").is_file()
+
+
+def test_a_tdx_expands_both_blocks_into_one_text_file(tmp_path, capsys, tdx_of):
+    credentials = parse_text('0\n{\n  cd-key "abcd-efgh"\n}\n').tags
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    raw = tdx_of(
+        pack_tag_tree(credentials),
+        pack_tag_tree(settings),
+    )
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(raw)
+    assert main([str(source)]) == 0
+    target = tmp_path / "assets.txt"
+    assert target.is_file()
+    assert parse_text(read_text(target)) == parse_tdx(raw)
+    out = capsys.readouterr().out
+    assert out.startswith("expanded ")
+    assert out.strip().endswith("assets.txt")
+
+
+def test_a_tdx_with_an_empty_first_block_expands_the_settings(tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    assert main([str(source)]) == 0
+    assert parse_text(read_text(tmp_path / "assets.txt")).tags == list(settings)
+
+
+def test_stdout_prints_the_text_form_of_a_tdx(tmp_path, capsys, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    assert main(["--stdout", str(source)]) == 0
+    assert settings[0].name in capsys.readouterr().out
+    assert not (tmp_path / "assets.txt").exists()
+
+
+def test_out_can_name_the_text_file_from_a_tdx(tmp_path, tdx_of):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    target = tmp_path / "out.txt"
+    assert main(["--out", str(target), str(source)]) == 0
+    assert parse_text(read_text(target)).tags == list(settings)
+    assert not (tmp_path / "assets.txt").exists()
+
+
+def test_a_tdx_that_is_not_a_tdx_is_reported(tmp_path, capsys):
+    bad = tmp_path / "bad.tdx"
+    bad.write_bytes(b"SQLite format 3\x00")
+    assert main([str(bad)]) == 1
+    assert "not a tdx file" in capsys.readouterr().err
+
+
+def test_an_obfuscated_tdx_is_reported(tmp_path, capsys, tdx_of):
+    source = tmp_path / "old.tdx"
+    source.write_bytes(tdx_of(b"", b"", version=50))
+    assert main([str(source)]) == 1
+    assert "obfuscated" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +311,7 @@ def test_run_cli_says_whether_every_file_worked(tmp_path):
 def test_the_verb_names_the_direction():
     assert verb(Path("config.chump")) == "expanded"
     assert verb(Path("config.CDP")) == "expanded"
+    assert verb(Path("assets.TDX")) == "expanded"
     assert verb(Path("config.txt")) == "packed"
     assert verb(Path("config.bin")) == "converted"
 

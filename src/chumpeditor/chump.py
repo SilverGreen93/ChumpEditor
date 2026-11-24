@@ -38,6 +38,10 @@ such a file comes back with that one byte changed and the same tags.
 
 Unknown types are kept as ``RawValue``: their bytes are preserved so a file
 that uses types this code does not know about still round-trips.
+
+An ``assets.tdx`` holds two of those CHUMP blocks back to back, followed by the
+asset database.  ``parse_tdx`` walks the TDX header and both blocks, and returns
+their tags as one tree; everything after the second block is left alone.
 """
 
 from __future__ import annotations
@@ -50,9 +54,16 @@ from pathlib import Path
 from typing import BinaryIO, Iterator, Sequence
 
 MAGIC = b"ACS$"
+TDX_MAGIC = b"\xdb\xa2\xeb\xce"
 #: the version word every chump file carries, 01 00 00 00 on disk
 DEFAULT_VERSION = 1
 FORMAT_VERSION = DEFAULT_VERSION  # kept as the VB.NET code named it
+#: the first TDX version with a plain body: earlier ones are obfuscated
+TDX_PLAIN_VERSION = 64
+#: from TRS22 on an edition string comes between the header and block #1
+TDX_EDITION_VERSION = 67
+_TDX_HEADER_SIZE = 12
+_CHUMP_HEADER_SIZE = 16
 NAME_ENCODING = "utf-8"  # tag names are bytes in the file, UTF-8 in CDP Explorer
 TEXT_ENCODING = "utf-8"  # string values, same, with a NUL on the end
 # both decode and encode with surrogateescape so bytes that are not valid UTF-8
@@ -344,6 +355,64 @@ def parse_chump(data: bytes) -> Tag:
 def load_chump(path: str | Path) -> Tag:
     """Read a .chump file from disk and return its tags."""
     return parse_chump(Path(path).read_bytes())
+
+
+def parse_tdx(data: bytes) -> Tag:
+    """The tags of both CHUMP blocks in an ``assets.tdx``, as one tree.
+
+    The TDX header is 12 bytes: magic, version and total file size.  Only the
+    version is used here, to decide whether the body is plain: versions before
+    64 are obfuscated and cannot be read, and from 67 on a one-byte length and
+    that many characters (the edition string) come before the first block.
+
+    Two blocks follow, each with the ordinary CHUMP header and its contents.
+    Walking them ends just before the asset database, which this reader leaves
+    alone.  An empty block simply contributes no tags, so a TANE file whose
+    credentials block is empty opens with just its settings.
+    """
+    if len(data) < _TDX_HEADER_SIZE:
+        raise ChumpError(f"file too short to be a tdx file ({len(data)} bytes)")
+    if data[:4] != TDX_MAGIC:
+        raise ChumpError(f"not a tdx file (starts with {data[:4]!r})")
+    version, _size = struct.unpack_from("<II", data, 4)
+    if version < TDX_PLAIN_VERSION:
+        raise ChumpError(
+            f"tdx version {version} is obfuscated; only version {TDX_PLAIN_VERSION} "
+            "and later can be opened"
+        )
+    offset = _TDX_HEADER_SIZE
+    if version >= TDX_EDITION_VERSION:
+        if offset >= len(data):
+            raise ChumpError("tdx edition string is truncated")
+        name_len = data[offset]
+        offset += 1 + name_len
+        if offset > len(data):
+            raise ChumpError("tdx edition string is truncated")
+
+    tags: list[Tag] = []
+    for number in (1, 2):
+        header = offset
+        if len(data) - offset < _CHUMP_HEADER_SIZE:
+            raise ChumpError(f"tdx chump block {number} header truncated at {header}")
+        if data[offset:offset + 4] != MAGIC:
+            raise ChumpError(
+                f"tdx chump block {number} has no {MAGIC.decode()!r} signature at {header}"
+            )
+        (length,) = struct.unpack_from("<I", data, offset + 12)
+        offset += _CHUMP_HEADER_SIZE
+        end = offset + length
+        if end > len(data):
+            raise ChumpError(
+                f"tdx chump block {number} length {length} at {header} runs past the end"
+            )
+        tags.extend(iter_tags(data[offset:end]))
+        offset = end
+    return Tag("<root>", tags)
+
+
+def load_tdx(path: str | Path) -> Tag:
+    """Read an ``assets.tdx`` from disk and return the tags of both blocks."""
+    return parse_tdx(Path(path).read_bytes())
 
 
 def parse_tag_tree(data: bytes) -> Tag:
@@ -1083,14 +1152,17 @@ def _parse_one_text(
 # files
 # --------------------------------------------------------------------------
 CHUMP_SUFFIXES = (".chump", ".cdp")
+TDX_SUFFIXES = (".tdx",)
 TEXT_SUFFIXES = (".txt",)
 
 
 def convert_file(src: str | Path, dst: str | Path | None = None) -> Path:
-    """Convert a file by extension: .chump/.cdp to .txt, .txt to .chump.
+    """Convert a file by extension: .chump/.cdp/.tdx to .txt, .txt to .chump.
 
     The destination defaults to the source with the other extension, written
-    next to it, which is what the original expander did.
+    next to it, which is what the original expander did.  A TDX's two blocks
+    come out as one text file; the other direction always writes a plain
+    .chump, never a TDX.
     """
     source = Path(src)
     suffix = source.suffix.lower()
@@ -1099,6 +1171,9 @@ def convert_file(src: str | Path, dst: str | Path | None = None) -> Path:
         with source.open("rb") as stream:
             root = parse_chump(stream.read())
         dump_text(root, target)
+    elif suffix in TDX_SUFFIXES:
+        target = Path(dst) if dst else source.with_suffix(".txt")
+        dump_text(parse_tdx(source.read_bytes()), target)
     elif suffix in TEXT_SUFFIXES:
         target = Path(dst) if dst else source.with_suffix(DEFAULT_EXTENSION)
         dump_chump(parse_text(read_text_file(source)), target)
