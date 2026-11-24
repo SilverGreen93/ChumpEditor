@@ -106,8 +106,8 @@ are never part of it, and what is saved is plain text whatever a line looked lik
   as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
   Find next (F3).
-- **View**: Treeview - a tick box that puts a list of the file's containers along
-  the left of the text. See [Tree of containers](#tree-of-containers).
+- **View**: Treeview (F2) - a tick box that puts a list of the file's containers
+  along the left of the text. See [Tree of containers](#tree-of-containers).
 - **Tweaks**: Convert obsolete lists, Convert asset-filename to mesh-table,
   Remove language tags and Reorder tags - the tidy-ups of the way older versions
   of Trainz wrote a file.  Reorder tags also puts the blank lines right: one sets a
@@ -232,6 +232,23 @@ near the end of a file, where there is nothing below to scroll through, it stops
 as near the middle as the file allows. A row whose line no longer names that
 container - the name deleted since the rows were written - is left alone rather
 than selecting whatever stands there now.
+
+Whether the panel stands there is remembered for the next time the program starts:
+ticking it writes `"treeview": true` and unticking it writes `false`, in one small
+file beside the list of recent files,
+
+```
+%APPDATA%\ChumpEditor\settings.json    (Windows)
+~/.config/ChumpEditor/settings.json    (elsewhere)
+```
+
+so a window comes back with the panels it was closed with. A panel hidden without
+going through the menu is remembered hidden too, and a value that is neither true
+nor false - a settings file edited by hand - counts as nothing remembered, so the
+panel starts away rather than standing there for reasons nobody can explain. Like
+the list of recent files, the settings are read and written without ever raising:
+a file that cannot be read leaves the status bar saying so and the program opens
+with its defaults.
 
 ### Syntax check
 
@@ -537,6 +554,7 @@ src/chumpeditor/tweaks.py      the four tidy-ups of the way older files read: Tw
 src/chumpeditor/search.py      where a piece of text stands in another, and what replaces it
 src/chumpeditor/paths.py       where this program's own files are kept
 src/chumpeditor/recent.py      the ten files opened last: recent.json in that folder
+src/chumpeditor/settings.py    what is remembered between runs: settings.json there
 src/chumpeditor/cli.py         command line
 src/chumpeditor/themes/        the theme that ships (trainz.json)
 src/chumpeditor/gui/           PyQt6 window: window.py, editor.py, menus.py, about.py,

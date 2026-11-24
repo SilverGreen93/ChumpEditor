@@ -108,8 +108,11 @@ def _view(menu, window: QMainWindow) -> None:
     The item is ticked rather than pressed, because the state it changes is one
     that goes on being - a panel that stands there until asked not to - and a
     person looking at the menu should be able to tell which way it stands now.
+
+    F2 is the key for it: F3 searches and F5 checks the syntax, and a panel that
+    has to be reached through a menu on every file is a panel nobody leaves open.
     """
-    treeview = _add(menu, "&Treeview", None, window.toggle_treeview)
+    treeview = _add(menu, "&Treeview", QKeySequence("F2"), window.toggle_treeview)
     treeview.setCheckable(True)
 
 

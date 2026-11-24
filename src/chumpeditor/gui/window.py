@@ -45,6 +45,7 @@ from ..document import (
 )
 from ..outline import containers
 from ..recent import RecentFiles
+from ..settings import Settings
 from .about import ABOUT_TITLE, about_html
 from .drops import accept_file_drop, dropped_paths
 from .editor import RichTextEditor
@@ -74,6 +75,9 @@ SYNTAX_TITLE = "Syntax check"
 
 #: how many problems one box will name before it says how many more there are
 REPORT_LIMIT = 25
+
+#: what the settings file calls the tree of containers, true while it stands open
+TREEVIEW_SETTING = "treeview"
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,8 @@ class ChumpWindow(QMainWindow):
         self.recent = RecentFiles()
         #: the menu those names are written into, filled in by ``build_menus``
         self.recent_menu = None
+        #: what the program remembers about itself between runs
+        self.settings = Settings()
 
         self.editor = RichTextEditor(self)
         self.setCentralWidget(self.editor)
@@ -155,12 +161,15 @@ class ChumpWindow(QMainWindow):
             # the list is a convenience, so a list that cannot be read is
             # mentioned in the status bar and the program carries on without it
             self.say(self.recent.broken)
+        if self.settings.broken:
+            self.say(self.settings.broken)
 
         # the rows are written out whenever the text changes, rather than when
         # the panel is brought up: a tree of text that is not there any more is
         # worse than no tree, and the check runs whether anybody is looking or not
         self.editor.document().contentsChanged.connect(self._refresh_treeview)
         self._refresh_treeview()
+        self._restore_treeview()
 
         if paths:
             self.open_paths(paths)
@@ -362,6 +371,9 @@ class ChumpWindow(QMainWindow):
         brought the tree up wants to click a row, so the keyboard goes to the text
         and not to the tree; that also means typing works straight away after the
         panel appears.
+
+        Which way it stands is written down, because a panel somebody keeps
+        bringing up on every file is a panel they would rather have already there.
         """
         if on is None:
             on = self.treeview.isHidden()
@@ -372,7 +384,23 @@ class ChumpWindow(QMainWindow):
             # the menu item and the panel are one thing, so a program that hides
             # the panel without asking still leaves the menu telling the truth
             self._treeview_action().setChecked(False)
+        self.settings.set(TREEVIEW_SETTING, on)
         self.editor.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _restore_treeview(self) -> None:
+        """Bring the tree back if the last session left it up.
+
+        The panel starts hidden and the menu item starts unticked, so both have to
+        be put right here; ticking the item is not enough, because an item brought
+        to the checked state by a program does not fire its own shortcut's slot.
+        A value that is not a tick or a cross - a settings file edited by hand -
+        counts for nothing, and the panel stays out of sight as it would have with
+        no file at all.
+        """
+        if not self.settings.get(TREEVIEW_SETTING, False, as_=bool):
+            return
+        self.treeview.show()
+        self._treeview_action().setChecked(True)
 
     def reveal_line(self, line: int) -> None:
         """Put the caret on a container's name and select it.

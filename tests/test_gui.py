@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QWidget,
 )
 
-from chumpeditor import __version__, recent  # noqa: E402
+from chumpeditor import __version__, recent, settings as kept  # noqa: E402
 from chumpeditor.chump import ChumpError, load_chump, parse_text, read_text_file  # noqa: E402
 from chumpeditor.document import (  # noqa: E402
     ALL_SUFFIXES,
@@ -113,14 +113,16 @@ def dialogs(monkeypatch):
 def settings(monkeypatch, tmp_path_factory):
     """The folder the program keeps its own files in, moved to the scratch folder.
 
-    The list of files opened lately is written as soon as a file is opened, so
-    every window here has to be pointed at a folder that gets thrown away: a
-    test run has no business filling in your real settings.  It is a folder of
-    its own, beside the one a test writes its files into, so a test that counts
-    what the editor wrote is not counting the list as well.
+    The list of files opened lately is written as soon as a file is opened, and
+    which panels stand open is written as soon as one is brought up, so every
+    window here has to be pointed at a folder that gets thrown away: a test run
+    has no business filling in your real settings.  It is a folder of its own,
+    beside the one a test writes its files into, so a test that counts what the
+    editor wrote is not counting the list as well.
     """
     folder = tmp_path_factory.mktemp("settings")
     monkeypatch.setattr(recent, "config_dir", lambda: folder)
+    monkeypatch.setattr(kept, "config_dir", lambda: folder)
     return folder
 
 
@@ -1236,6 +1238,43 @@ def test_the_view_menu_holds_one_ticked_item(window):
     assert item(window, "View", "Treeview").isCheckable()
 
 
+def test_the_view_menu_carries_the_key_for_the_treeview(window):
+    """F2, so a file being looked over does not have to go through the menu.
+
+    F3 is the search and F5 the syntax check; the key has to be said here as well
+    as in the menu, because a shortcut nobody wrote down is a shortcut that goes
+    missing when a menu is rewritten.
+    """
+    assert keys(window, "View", "Treeview") == "F2"
+
+
+def test_F2_brings_the_treeview_up_and_takes_it_away_again(qapp, window):
+    """The key answers from wherever the keyboard stands, and types nothing."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(NESTED)
+    qapp.processEvents()
+
+    press_key(qapp, window, window.editor, "F2")
+    assert not window.treeview.isHidden()
+    assert item(window, "View", "Treeview").isChecked()
+    assert window.editor.toPlainText() == NESTED  # the key is not typed into the text
+
+    press_key(qapp, window, window.editor, "F2")
+    assert window.treeview.isHidden()
+    assert not item(window, "View", "Treeview").isChecked()
+    assert window.editor.toPlainText() == NESTED
+
+
+def test_the_keyboard_is_left_in_the_text_after_F2(qapp, window):
+    """The key is pressed in the text and the text keeps it, so typing goes on."""
+    window.show()
+    qapp.processEvents()
+    window.editor.setPlainText(NESTED)
+    press_key(qapp, window, window.editor, "F2")
+    assert window.editor.hasFocus()
+
+
 def test_the_view_menu_item_is_ticked_only_while_the_panel_is_up(window):
     ticked = item(window, "View", "Treeview")
     assert not ticked.isChecked()
@@ -1413,6 +1452,143 @@ def test_the_treeview_is_ticked_again_when_it_is_hidden_another_way(window):
     window.toggle_treeview(False)
     assert window.treeview.isHidden()
     assert not item(window, "View", "Treeview").isChecked()
+
+
+# ---------------------------------------------------------------------------
+# which way the treeview stands is remembered for the next time
+# ---------------------------------------------------------------------------
+def test_a_window_that_has_remembered_nothing_starts_with_the_tree_away(window, settings):
+    """No settings file at all: the panel is out of sight and the menu unticked.
+
+    Checked here because it is the case every other test runs in without saying
+    so, and a bug that left the panel up by default would otherwise only show as
+    a hundred other tests behaving oddly.
+    """
+    assert window.treeview.isHidden()
+    assert not item(window, "View", "Treeview").isChecked()
+    assert not (settings / "settings.json").exists()
+
+
+def test_bringing_the_tree_up_writes_down_that_it_is_up(window, settings):
+    """The state of a panel somebody keeps bringing up is worth keeping."""
+    click(window, "View", "Treeview")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": True
+    }
+
+
+def test_taking_the_tree_away_writes_that_down_too(window, settings):
+    click(window, "View", "Treeview")
+    click(window, "View", "Treeview")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": False
+    }
+
+
+def test_a_tree_left_up_comes_back_up_in_the_next_window(window, settings):
+    """The window is opened again over the settings of the one before it.
+
+    The menu item has to be ticked as well as the panel shown: an unticked item
+    beside a standing panel promises a press that hides it, and the first thing
+    somebody does with a panel they did not ask for is try to get rid of it.
+    """
+    click(window, "View", "Treeview")
+
+    again = ChumpWindow()
+    try:
+        assert not again.treeview.isHidden()
+        assert item(again, "View", "Treeview").isChecked()
+    finally:
+        again.close()
+
+
+def test_a_tree_left_away_stays_away_in_the_next_window(window, settings):
+    """Remembering includes remembering a thing was put out of sight."""
+    click(window, "View", "Treeview")
+    click(window, "View", "Treeview")
+
+    again = ChumpWindow()
+    try:
+        assert again.treeview.isHidden()
+        assert not item(again, "View", "Treeview").isChecked()
+    finally:
+        again.close()
+
+
+def test_a_tree_brought_up_with_F2_is_remembered_like_any_other_way(qapp, window, settings):
+    """The key goes through the same door as the menu item, so it remembers too."""
+    window.show()
+    qapp.processEvents()
+    press_key(qapp, window, window.editor, "F2")
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": True
+    }
+
+
+def test_hiding_the_panel_another_way_is_remembered_as_hidden(window, settings):
+    """A panel taken away without the menu still leaves the file telling the truth."""
+    click(window, "View", "Treeview")
+    window.treeview.hide()
+    window.toggle_treeview(False)
+    assert json.loads((settings / "settings.json").read_text(encoding="utf-8")) == {
+        "treeview": False
+    }
+
+
+def test_settings_written_for_one_panel_leave_the_other_alone(settings, tmp_path):
+    """One file for all the settings, and one setting written at a time.
+
+    The window is built after the file is written, because that is the order that
+    matters: the other person's setting has to be read in before this program
+    writes its own down, or it is gone by the time anybody looks.
+    """
+    (settings / "settings.json").write_text(
+        json.dumps({"theme": "classic", "treeview": True}), encoding="utf-8"
+    )
+    one = copy("config1.chump", tmp_path)
+
+    shown = ChumpWindow()
+    try:
+        assert not shown.treeview.isHidden()  # the file's own answer was read
+        click(shown, "View", "Treeview")  # down to False
+        shown.open_path(one)  # and a file opened, which writes the list beside it
+    finally:
+        shown.close()
+
+    written = json.loads((settings / "settings.json").read_text(encoding="utf-8"))
+    assert written == {"theme": "classic", "treeview": False}
+    assert json.loads((settings / "recent.json").read_text(encoding="utf-8")) == [str(one)]
+
+
+def test_a_setting_that_is_not_a_tick_counts_as_nothing_remembered(window, settings):
+    """A settings file is a text file somebody can edit by hand.
+
+    ``"treeview": "yes please"`` is a mistake, and a program that read it as true
+    would have the panel standing there for reasons nobody could explain - which
+    is worse than the panel being away when it was wanted.
+    """
+    (settings / "settings.json").write_text(
+        json.dumps({"treeview": "yes please"}), encoding="utf-8"
+    )
+    shown = ChumpWindow()
+    try:
+        assert shown.treeview.isHidden()
+        assert not item(shown, "View", "Treeview").isChecked()
+    finally:
+        shown.close()
+
+
+def test_a_settings_file_that_cannot_be_read_is_said_and_done_without(window, settings):
+    """The panel's place in the window is no reason to fail to open a file."""
+    (settings / "settings.json").write_text("{not a list at all}", encoding="utf-8")
+    shown = ChumpWindow()
+    try:
+        assert "settings" in shown.statusBar().currentMessage()
+        assert shown.treeview.isHidden()
+        click(shown, "View", "Treeview")
+        assert not shown.treeview.isHidden()
+    finally:
+        shown.close()
 
 
 def choose_row(window, name: str) -> None:
