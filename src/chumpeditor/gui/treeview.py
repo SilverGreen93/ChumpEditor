@@ -20,8 +20,8 @@ empty because the document is empty would read as a fault in the file.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QLine, QRect, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPalette, QPainter, QPen
+from PyQt6.QtCore import QPointF, QRect, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPalette, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QDockWidget,
     QProxyStyle,
@@ -39,6 +39,47 @@ __all__ = ["ContainerTree", "PANEL_TITLE"]
 #: the panel's own name: it has no title bar to show it in, so the name is there
 #: for anything that asks a widget what it is
 PANEL_TITLE = "Containers"
+
+#: how thick a chevron's strokes are, in logical pixels: antialiasing spreads
+#: them over about a device pixel and a half at 100 percent, which is the weight
+#: the same mark carries in the rest of Windows
+CHEVRON_WIDTH = 1.2
+
+#: how much of the joining lines' colour comes from the letters: three eighths of
+#: the colour the rows are written in, walked toward the paper they stand on.
+#: The same step in both directions, which is what other applications do and what
+#: no palette role answers - see ``_the_line_ink``
+LINE_STRENGTH = 0.375
+
+
+def _the_line_ink(palette: QPalette) -> QColor:
+    """The grey the joining lines and the chevron are drawn in.
+
+    A line that joins rows is a step off the background, not a mark on it: in a
+    light Windows tree that step is a grey around ``#a0a0a0`` standing on white,
+    and in a dark one it is a grey around the same distance the other way,
+    standing on a background near ``#2d2d2d``.  No palette role gives both,
+    measured with PyQt6 6.12 on a dark desktop: there ``Dark`` is ``#1e1e1e``,
+    *darker* than the ``#2d2d2d`` the rows stand on, so the lines vanish, and
+    ``Midlight`` does the same trick in reverse on a light desktop.  So the step
+    is taken from what the palette does answer - the colour the letters are
+    written in, walked toward the paper - which keeps the lines the same weight
+    above a dark editor as above a light one, and lets a desktop going dark or
+    light change them by itself.
+    """
+    paper = palette.color(QPalette.ColorRole.Base)
+    letters = palette.color(QPalette.ColorRole.Text)
+    step = LINE_STRENGTH
+    return QColor(
+        round(letters.red() * step + paper.red() * (1.0 - step)),
+        round(letters.green() * step + paper.green() * (1.0 - step)),
+        round(letters.blue() * step + paper.blue() * (1.0 - step)),
+    )
+
+
+#: the grey to draw in when Qt asks for a join without naming the widget that
+#: owns it, which leaves no palette to ask: the answer for a light desktop
+FALLBACK_INK = QColor("#a0a0a0")
 
 
 class _JoinLines(QProxyStyle):
@@ -79,6 +120,14 @@ class _JoinLines(QProxyStyle):
     is handed ``State_Open`` too, measured with PyQt6 6.12, so the mark is asked of
     ``State_Children`` rather than of that.
 
+    The mark is the chevron the rest of Windows uses for a group, drawn as a path
+    with antialiasing; the lines are left hard-edged, because Qt puts a
+    whole-number line on a whole device pixel and that one pixel is what a joining
+    line is meant to be.  Both are drawn in the grey ``_the_line_ink`` works out of
+    the palette: the colour the rows are written in, stepped off the paper they
+    stand on, which is far lighter than the letters themselves and keeps its weight
+    whether the desktop is light or dark.
+
     A style is stood on the tree rather than a stylesheet laid over it, because a
     stylesheet would have to be given pictures of the lines to draw - files to
     ship with the program and an ``assets`` folder to find them in - while this
@@ -98,11 +147,12 @@ class _JoinLines(QProxyStyle):
         square = option.rect
         if square.width() < 3 or square.height() < 5:
             return
-        # the lines are drawn in the colour the rows themselves are written in,
-        # darkened a little, so they keep their place when the desktop goes dark
-        ink = QColor("#808080")
-        if widget is not None:
-            ink = widget.palette().color(QPalette.ColorRole.Text).darker(170)
+        # the lines and the mark are drawn in one grey, worked out from the
+        # palette so it keeps its step off the background when the desktop goes
+        # dark; the colour the rows are written in is far too heavy by itself,
+        # and darkening black does nothing at all: measured with PyQt6 6.12,
+        # Text.darker(170) of #000000 is still #000000
+        ink = _the_line_ink(widget.palette()) if widget is not None else FALLBACK_INK
         _the_join(square, option.state, painter, ink)
 
 
@@ -120,27 +170,26 @@ def _the_mark_size(square: QRect) -> int | None:
     return half if half >= 2 else None
 
 
-def _the_mark(middle_x: int, middle_y: int, half: int, opened: bool) -> list[QLine]:
-    """The mark itself: pointing down when opened, along the row when shut.
+def _the_chevron(middle_x: int, middle_y: int, half: int, opened: bool) -> QPolygonF:
+    """The mark itself: two strokes, ``v`` when opened, ``>`` when shut.
 
-    Answered as the rows of pixels the mark is filled with rather than as a
-    polygon, because at the two to four pixels it is given the shape is only a
-    handful of pixels wide: a polygon would be outlined and filled by the style's
-    own rules and come out leaning to one side.  The point of the mark lands on
-    the line it stands on.
+    The same mark every Windows application uses for a group, and drawn the same
+    way - as a path with antialiasing, not as pixels laid out by hand.  A filled
+    triangle a few logical pixels wide cannot be made to look right at the
+    fractions a scaled display asks for: each row of it lands half way between
+    two device pixels, and the edge comes out lumpy.
     """
-    rows: list[QLine] = []
-    for step in range(half * 2 + 1):
-        # the mark tapers one pixel every other row, from full width at its base
-        # down to a single point standing on the line it marks
-        reach = half - (step + 1) // 2
-        if opened:
-            row_y = middle_y - half + step
-            rows.append(QLine(middle_x - reach, row_y, middle_x + reach, row_y))
-        else:
-            row_x = middle_x - half + step
-            rows.append(QLine(row_x, middle_y - reach, row_x, middle_y + reach))
-    return rows
+    if opened:
+        return QPolygonF([
+            QPointF(middle_x - half, middle_y - half),
+            QPointF(middle_x, middle_y + half),
+            QPointF(middle_x + half, middle_y - half),
+        ])
+    return QPolygonF([
+        QPointF(middle_x - half, middle_y - half),
+        QPointF(middle_x + half, middle_y),
+        QPointF(middle_x - half, middle_y + half),
+    ])
 
 
 def _the_join(square: QRect, state, painter: QPainter, ink: QColor) -> None:
@@ -153,20 +202,22 @@ def _the_join(square: QRect, state, painter: QPainter, ink: QColor) -> None:
     middle_x = square.left() + square.width() // 2
     middle_y = square.top() + square.height() // 2
     follows = bool(state & QStyle.StateFlag.State_Sibling)
-    if not state & QStyle.StateFlag.State_Item:
-        # a level above this row on the way down: the line only, and only while a
-        # row still follows at this level
-        if follows:
-            painter.drawLine(middle_x, square.top(), middle_x, square.bottom())
-        return
-    half = _the_mark_size(square) if state & QStyle.StateFlag.State_Children else None
-    if half is None:
-        above, under, across = middle_y, middle_y, middle_x
-    else:
-        above, under, across = middle_y - half - 1, middle_y + half + 1, middle_x + half + 1
     painter.save()
     try:
+        # the pen is set before anything is drawn, or a level above the row gets
+        # the style's own pen instead of the ink it was handed
         painter.setPen(QPen(ink))
+        if not state & QStyle.StateFlag.State_Item:
+            # a level above this row on the way down: the line only, and only
+            # while a row still follows at this level
+            if follows:
+                painter.drawLine(middle_x, square.top(), middle_x, square.bottom())
+            return
+        half = _the_mark_size(square) if state & QStyle.StateFlag.State_Children else None
+        if half is None:
+            above, under, across = middle_y, middle_y, middle_x
+        else:
+            above, under, across = middle_y - half - 1, middle_y + half + 1, middle_x + half + 1
         # down from the row above, as far as the mark or the middle of the square
         painter.drawLine(middle_x, square.top(), middle_x, above)
         # and on down only while another row follows at this level; stopping here
@@ -176,9 +227,17 @@ def _the_join(square: QRect, state, painter: QPainter, ink: QColor) -> None:
         # across to the name, from the mark or from the middle of the square
         painter.drawLine(across, middle_y, square.right(), middle_y)
         if half is not None:
-            # the mark fills the gap the lines stopped short of
-            for row in _the_mark(middle_x, middle_y, half, bool(state & QStyle.StateFlag.State_Open)):
-                painter.drawLine(row)
+            # the chevron stands in the gap the lines stopped short of, and is the
+            # only part of the drawing that is antialiased: the lines are left
+            # hard-edged because Qt puts a whole-number line on a whole device
+            # pixel, which is the single pixel of width they are meant to have
+            pen = QPen(ink, CHEVRON_WIDTH)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            opened = bool(state & QStyle.StateFlag.State_Open)
+            painter.drawPolyline(_the_chevron(middle_x, middle_y, half, opened))
     finally:
         painter.restore()
 

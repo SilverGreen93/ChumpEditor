@@ -21,6 +21,7 @@ pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import QEvent, QPoint, QRect, Qt, QUrl  # noqa: E402
 from PyQt6.QtGui import (  # noqa: E402
+    QColor,
     QDragLeaveEvent,
     QImage,
     QKeyEvent,
@@ -55,7 +56,7 @@ from chumpeditor.document import (  # noqa: E402
 from chumpeditor.gui import APP_TITLE, ChumpWindow, RichTextEditor  # noqa: E402
 from chumpeditor.gui.drops import accept_file_drop  # noqa: E402
 from chumpeditor.gui.editor import code_font  # noqa: E402
-from chumpeditor.gui.treeview import ContainerTree, _the_mark_size  # noqa: E402
+from chumpeditor.gui.treeview import ContainerTree, _the_line_ink, _the_mark_size  # noqa: E402
 from chumpeditor.gui.resources import (  # noqa: E402
     APP_NAME,
     CREDIT,
@@ -1258,12 +1259,42 @@ def test_a_line_stops_where_the_rows_it_joins_stop(qapp, tree):
         assert not _a_line_is_there(tree, picture, (where_x, above.bottom() - 1))
 
 
+def test_the_lines_keep_their_step_when_the_desktop_goes_dark(qapp, tree):
+    """The rows are still joined on a dark desktop, where the grey goes the other way.
+
+    The panel follows the desktop's colours, and this machine's desktop is dark:
+    the rows stand on ``#2d2d2d`` rather than on white.  A palette role is no use
+    for a joining line there, because the style's own ``Dark`` is ``#1e1e1e`` -
+    darker than the paper, which leaves the lines invisible.  The grey is asked of
+    the picture instead, and so has to step off the paper whichever way the paper
+    happens to go.
+    """
+    paper = QColor("#2d2d2d")
+    dark = QPalette()
+    dark.setColor(QPalette.ColorRole.Base, paper)
+    dark.setColor(QPalette.ColorRole.Text, QColor("#ffffff"))
+    tree.tree.setPalette(dark)
+    tree.set_text(NESTED)
+    tree.show()
+    qapp.processEvents()
+
+    ink = _the_line_ink(tree.tree.palette())
+    assert ink.lightness() > paper.lightness(), (
+        f"{ink.name()} sinks into the {paper.name()} the rows stand on"
+    )
+    # and it is that grey which is laid down, not some other colour
+    picture = _the_panel_painted(tree)
+    room = _the_own_room(tree, tree.topLevelItem(0))
+    _, where_y = _the_meeting_point(room)
+    assert _a_line_is_there(tree, picture, (room.right() - 1, where_y))
+
+
 def test_a_group_marks_whether_it_stands_opened(qapp, tree):
     """Down into the rows it holds when opened, along the row when shut.
 
-    The mark stands on the intersection, so the top corners tell the two apart:
-    an opened group is wide across the top of the mark and narrow at the bottom, a
-    shut one the other way about.
+    The mark is the chevron every Windows application uses for a group, standing
+    on the place where the joining lines meet; the corners of that place tell the
+    two apart, because the chevron opens downwards or sideways.
     """
     tree.set_text(NESTED)
     tree.show()
@@ -1276,14 +1307,14 @@ def test_a_group_marks_whether_it_stands_opened(qapp, tree):
     assert half, "a row holding rows was given no room for a mark"
 
     picture = _the_panel_painted(tree)
-    assert _a_line_is_there(tree, picture, (where_x - half, where_y - half)), "an opened group is not marked as opened"
-    assert not _a_line_is_there(tree, picture, (where_x - half, where_y + half))
+    assert _a_mark_is_there(tree, picture, (where_x + half, where_y - half)), "an opened group is not marked as opened"
+    assert not _a_mark_is_there(tree, picture, (where_x + half, where_y + half))
 
     mesh.setExpanded(False)
     qapp.processEvents()
     picture = _the_panel_painted(tree)
-    assert _a_line_is_there(tree, picture, (where_x - half, where_y + half)), "a shut group is not marked as shut"
-    assert not _a_line_is_there(tree, picture, (where_x + half, where_y - half))
+    assert _a_mark_is_there(tree, picture, (where_x - half, where_y + half)), "a shut group is not marked as shut"
+    assert not _a_mark_is_there(tree, picture, (where_x + half, where_y - half))
     # and shut, the row is still joined to the file: the corner and the line
     # across to the name are drawn whatever the mark says
     assert _a_line_is_there(tree, picture, (room.right() - 1, where_y))
@@ -1387,13 +1418,30 @@ def _the_meeting_point(room: QRect) -> tuple[int, int]:
 def _a_line_is_there(tree, picture, place) -> bool:
     """Whether the panel laid a joining line at this place of its own viewport.
 
-    The lines are drawn in one colour and nothing else in that strip is, so the
-    colour answers whether a line was drawn and where.
+    The lines are hard-edged - Qt puts a whole-number line on a whole device
+    pixel - so they are exactly the colour they were asked for, and that colour
+    answers both whether a line was drawn and where.
     """
+    ink = _the_line_ink(tree.tree.palette()).name()
+    return _the_ink_at(tree, picture, place) == ink
+
+
+def _a_mark_is_there(tree, picture, place) -> bool:
+    """Whether anything at all was painted at this place.
+
+    The chevron is drawn with antialiasing, so its edges are shades of the ink
+    rather than the ink itself; asking for the exact colour there would answer no
+    about a mark that is plainly standing there.
+    """
+    paper = tree.tree.palette().color(QPalette.ColorRole.Base).name()
+    return _the_ink_at(tree, picture, place) != paper
+
+
+def _the_ink_at(tree, picture, place) -> str:
+    """The colour of one place of the painted panel, by viewport coordinates."""
     x, y = place
     corner = tree.tree.viewport().mapTo(tree, QPoint(0, 0))
-    ink = tree.tree.palette().color(QPalette.ColorRole.Text).darker(170).name()
-    return _the_ink_of(picture, (corner.x() + x, corner.y() + y)) == ink
+    return _the_ink_of(picture, (corner.x() + x, corner.y() + y))
 
 
 def test_an_empty_container_still_has_its_row(tree):

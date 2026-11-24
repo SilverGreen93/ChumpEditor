@@ -245,8 +245,12 @@ program's.
 Windows draws a tree with triangles and no lines, so the lines are drawn by the
 panel itself, and each level stands half as far behind the one above it as
 Windows would ask - roomy enough for a file whose deepest containers are three or
-four levels down, without the panel eating the text area. A container holding
-containers carries a mark on the place where its lines meet: pointing down while
+four levels down, without the panel eating the text area. The lines are drawn a step off the colour the rows stand on, in whichever
+direction that colour goes, so they sit quietly behind the names on a light
+desktop and stay seen on a dark one; each is one device pixel wide whatever the
+display scaling is. A container holding containers carries a chevron on the place
+where its lines meet, the same mark every other Windows application uses for a
+group, drawn as a shape with smoothing rather than as pixels: pointing down while
 it stands opened, along the row once it is shut. Clicking that mark shuts the
 group or opens it again, and it is the only way to do either, since a click on a
 row means the text and double-clicking a name deliberately expands nothing.
