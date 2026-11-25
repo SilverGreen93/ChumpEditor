@@ -327,6 +327,11 @@ See [chump-format.md](chump-format.md) for the reference. The short version:
   text form a name runs to its value, or to the `{` a container opens, which is
   how `Scenery Objects` and the `2018-12-15 162811.jpg` inside a screenshots
   container are each one name.
+- A `BINARY` (`0x04`) value is written as `b"..."`: printable characters as
+  themselves, `"` and `\` behind a backslash, everything else as `\xNN`, all of
+  it on one line, so it reads back as the same bytes. A type the reader does not
+  know is written the same way with that byte in front - `08b"..."` - and keeps
+  its type through the text.
 
 Two places where the written spec and the files disagree, resolved in favour of
 the bytes: the spec never lists `0x05` or `0x0D`, and `kuid-format.md` says a
@@ -334,12 +339,12 @@ kuid is type `0x05` while the example bytes in that same document say `0x0D`.
 A type byte the reader does not know is kept as `RawValue` and written back
 unchanged.
 
-**Lossy through the text detour.** The text form has no notation for a `BINARY`
-(`0x04`) value, so its bytes are written out raw and read back as a string with
-a different type byte. Nothing in this repo's samples is `BINARY`, which is why
-the round-trip tests pass; if a `.chump` of yours has one, keep the original
-next to the text rather than deleting it. Everything else - containers, ints,
-floats, strings, nulls, kuids - survives.
+**Nothing is lost through the text.** A `BINARY` (`0x04`) value and a type byte
+the reader does not know are both written out as bytes that read back as the
+same bytes, so `pack_chump(parse_text(render_text(load_chump(path))))` gives the
+file back exactly. What the notation costs is size: those bytes come out roughly
+three times bigger as text than they are in the file, and each one stays on a
+single very long line.
 
 The assets.tdx format is described in [tdx-format.md](tdx-format.md)
 

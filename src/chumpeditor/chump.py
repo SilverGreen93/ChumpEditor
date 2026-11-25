@@ -32,12 +32,13 @@ An int or float tag whose value is longer than one element holds a run of
 them, one after another until the tag length is used up, and the text form
 writes that run comma separated (``camera   -1.058,0.522,0.887``).
 
-The text form carries no type marker, so a float that reads out whole reads
-back as an int (a ``fontcolor   0`` stored as type 02 goes back as type 01);
-such a file comes back with that one byte changed and the same tags.
+The text form says what each value is, so the detour through it loses nothing:
+a float is written with a decimal point, and the bytes of a binary tag are
+written escaped inside ``b"..."``, which reads back as those same bytes.
 
-Unknown types are kept as ``RawValue``: their bytes are preserved so a file
-that uses types this code does not know about still round-trips.
+Unknown types are kept as ``RawValue``: their bytes are preserved and the text
+form writes them as ``08b"..."``, so a type this code does not know about keeps
+its type byte as well as its bytes.
 
 An ``assets.tdx`` holds two of those CHUMP blocks back to back, followed by the
 asset database.  ``parse_tdx`` walks the TDX header and both blocks, and returns
@@ -700,9 +701,17 @@ def _render_one(value: object, value_type: int | None) -> str:
         # is a whole number or was handed over as a plain int
         return _format_float(float(value))
     if isinstance(value, (bytes, bytearray)):
-        return value.decode(TEXT_ENCODING, "surrogateescape")
+        return f'b"{_the_bytes_as_text(value)}"'
     if isinstance(value, RawValue):
-        return value.data.decode(TEXT_ENCODING, "surrogateescape")
+        # the type byte goes in front of the bytes so an unknown type survives the
+        # text form instead of coming back as a plain string; a type the text form
+        # writes in its own way has no bytes to spell out, so there is nothing
+        # honest to write
+        if value.type_id in _THE_TYPES_WITH_THEIR_OWN_NOTATION:
+            raise ChumpError(
+                f"cannot write a value of type {value.type_id:#02x} as bytes"
+            )
+        return f'{value.type_id:02x}b"{_the_bytes_as_text(value.data)}"'
     return str(value)
 
 
@@ -727,6 +736,194 @@ def _format_float(value: float) -> str:
 def _with_a_decimal(text: str) -> str:
     """The number with at least one decimal digit, which ``5.0`` is and ``5`` is not."""
     return text if "." in text else f"{text}.0"
+
+
+# --------------------------------------------------------------------------
+# a run of bytes in the text form
+# --------------------------------------------------------------------------
+#: A BINARY tag holds bytes that are rarely text, so they are not written as
+#: text.  ``b"..."`` says bytes, and inside it every byte that is not an ordinary
+#: printable character is spelled out as ``\xNN``, while ``"`` and ``\`` carry a
+#: backslash so nothing inside can be mistaken for the end of the value.  The
+#: whole value stands on one line: a raw newline is never written inside it, so
+#: a binary value never runs over into the line below.
+#:
+#: A type byte this code does not know is written the same way with that byte in
+#: front of the ``b``, ``08b"..."`` for a type 0x08, so those bytes keep their
+#: type through the text form instead of coming back as a string.
+_A_BINARY_MARKER = re.compile(r'(?:([0-9a-fA-F]{2}))?b"')
+
+#: what a name ends with, used to tell the ``b"`` of a value from the one inside
+#: a word written where no value can start
+_A_WORD_CHARACTER = re.compile(r"[A-Za-z0-9_-]")
+
+#: the types the text form already writes in its own way.  A type byte written in
+#: front of a run of bytes is only ever one the reader does not know; writing out
+#: one of these would leave the bytes to be read again as a number or a kuid
+_THE_TYPES_WITH_THEIR_OWN_NOTATION = frozenset(
+    {
+        TagType.CONTAINER, TagType.INT32, TagType.FLOAT32, TagType.STRING,
+        TagType.NULL, TagType.INT64, TagType.KUID,
+    }
+)
+
+#: what stands inside a spelled out value, read in one pass: a run of ordinary
+#: printable characters, one escape, or the single character that has no business
+#: there and is reported instead of decoded.  The escape is tried before the last
+#: branch, so the two backslashes of ``\\`` are read as one escape and a backslash
+#: escaping nothing is caught on its own
+_A_BYTE_OF_A_BINARY_VALUE = re.compile(
+    r"[\x20\x21\x23-\x5b\x5d-\x7e]+|\\(?:[\\\"]|x[0-9a-fA-F]{2})|([\s\S])"
+)
+
+
+def _the_escape_table() -> tuple[str, ...]:
+    """What each of the 256 bytes is written as inside a binary value."""
+    table = [f"\\x{byte:02x}" for byte in range(256)]
+    for byte in range(0x20, 0x7F):
+        table[byte] = chr(byte)
+    table[0x22], table[0x5C] = '\\"', "\\\\"
+    return tuple(table)
+
+
+_ESCAPED = _the_escape_table()
+
+#: the escapes that stand for a character of their own, and the byte each means
+_THE_ESCAPES = {'"': 0x22, "\\": 0x5C}
+
+#: says a binary value's closing quote never comes, in the same place the single
+#: character at fault is reported for a byte that is spelled wrong
+_NEVER_CLOSED = "never closed"
+
+#: and says the type spelled out in front of the bytes is one the text form has a
+#: notation of its own for, so those bytes would be read again as something else
+_A_TYPE_WRITTEN_TWICE = "a type the text writes itself"
+
+
+def _the_bytes_as_text(data: bytes) -> str:
+    """The bytes of a binary value, spelled out so they read back as they are."""
+    return "".join(_ESCAPED[byte] for byte in data)
+
+
+def _the_bytes_from_text(text: str) -> tuple[bytes, str]:
+    """What a spelled out run of bytes stands for, read and checked in one pass.
+
+    The bytes come back with the first character that has no business there, or
+    nothing when the run is a well written value: a file full of embedded meshes
+    is read once rather than checked and then read again.
+    """
+    written = bytearray()
+    out_of_place = ""
+
+    def as_a_byte(found: re.Match) -> str:
+        nonlocal out_of_place
+        character = found.group(1)
+        if character is not None:  # a character that is not a byte of the value
+            out_of_place = out_of_place or character
+        elif found.group()[0] == "\\":
+            token = found.group()
+            written.append(
+                int(token[2:], 16) if token[1] == "x" else _THE_ESCAPES[token[1]]
+            )
+        else:
+            written.extend(found.group().encode("ascii"))
+        return ""
+
+    _A_BYTE_OF_A_BINARY_VALUE.sub(as_a_byte, text)
+    return bytes(written), out_of_place
+
+
+def _the_quote_at_is_escaped(text: str, at: int) -> bool:
+    """Whether the quote at this spot stands behind an odd number of backslashes."""
+    marks = 0
+    while at - 1 - marks >= 0 and text[at - 1 - marks] == "\\":
+        marks += 1
+    return marks % 2 == 1
+
+
+def _the_bytes_a_binary_value_holds(value: str) -> tuple[bytes, str]:
+    """The bytes a whole ``b"..."`` stands for, and what is wrong with it.
+
+    The caller has already read the opening ``b"``.  ``_NEVER_CLOSED`` is
+    reported for a value whose closing quote is missing or stands escaped, and
+    ``_A_TYPE_WRITTEN_TWICE`` for a type byte in front of it that the text form
+    writes in its own way; anything else is the character at fault, and nothing
+    is reported for a value that reads.
+    """
+    opened = _A_BINARY_MARKER.match(value)
+    spelled = opened.group(1)
+    if spelled is not None and int(spelled, 16) in _THE_TYPES_WITH_THEIR_OWN_NOTATION:
+        return b"", _A_TYPE_WRITTEN_TWICE
+    written = value[opened.end():]
+    if not written.endswith('"') or _the_quote_at_is_escaped(written, len(written) - 1):
+        return b"", _NEVER_CLOSED
+    return _the_bytes_from_text(written[:-1])
+
+
+def _the_end_of_a_binary_value(text: str, at: int = 0) -> int:
+    """Where the binary value written at this spot ends, or -1 when none is there.
+
+    This is the colouring's reading of a value, which is content to stop at the
+    first quote that nothing escapes: a value spelled wrong is still one value to
+    paint, and the syntax check is what says what is wrong with it.  A value is
+    only ever written after a gap, so the ``b`` of ``ab"x"`` opening no value
+    looks like one and is left to the theme.
+    """
+    if at and _A_WORD_CHARACTER.match(text[at - 1]):
+        return -1
+    marker = _A_BINARY_MARKER.match(text, at)
+    if marker is None:
+        return -1
+    found = text.find('"', marker.end())
+    while found > 0 and _the_quote_at_is_escaped(text, found):
+        found = text.find('"', found + 1)
+    return found + 1 if found > 0 else len(text)
+
+
+def _a_binary_value_is_written_whole(text: str) -> bool:
+    """Whether this text is one whole binary value, from end to end."""
+    return _A_BINARY_MARKER.match(text) is not None and not (
+        _the_bytes_a_binary_value_holds(text)[1]
+    )
+
+
+def _what_is_wrong_with_a_binary_value(value: str, name: str, line: int) -> Problem:
+    """Why text that starts as a binary value is not one."""
+    _bytes, at_fault = _the_bytes_a_binary_value_holds(value)
+    if at_fault == _NEVER_CLOSED:
+        return Problem(line, f"binary value for tag '{name}' is never closed")
+    if at_fault == _A_TYPE_WRITTEN_TWICE:
+        return Problem(
+            line,
+            f"binary value for tag '{name}' says its type is {value[:2]}, which "
+            "the text form writes a value of its own for",
+        )
+    if at_fault == "\\":
+        return Problem(
+            line,
+            f"binary value for tag '{name}' has a backslash that escapes nothing",
+        )
+    if at_fault == '"':
+        return Problem(
+            line, f"binary value for tag '{name}' has a quote mark that is not escaped"
+        )
+    return Problem(
+        line,
+        f"binary value for tag '{name}' has a character that has to be spelled "
+        f"out: {at_fault!r}",
+    )
+
+
+def _a_binary_value_written(value: str, name: str, line: int) -> tuple[object, int]:
+    """The value and the type a spelled out run of bytes stands for."""
+    data, at_fault = _the_bytes_a_binary_value_holds(value)
+    if at_fault:
+        raise ChumpError(str(_what_is_wrong_with_a_binary_value(value, name, line)))
+    spelled = _A_BINARY_MARKER.match(value).group(1)
+    type_id = TagType.BINARY if spelled is None else int(spelled, 16)
+    if type_id == TagType.BINARY:
+        return data, TagType.BINARY
+    return RawValue(type_id, data), type_id
 
 
 # --------------------------------------------------------------------------
@@ -831,17 +1028,19 @@ _A_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 def _a_value_is_written_whole(stripped: str) -> bool:
     """Whether this text is a value all on its own, from end to end.
 
-    Only a quoted string, a ``<kuid...>`` or a number can be a value, so a whole
-    one of those says where the name before it ends - which is what lets a name
-    hold spaces: ``Scenery Objects    "<kuid2:401543:3220:1>,"``.  Text that
-    merely starts as if it were one is not, so neither the ``prose <not a kuid>
-    here`` of a string value nor the ``"{`` of a value running over the line
-    below breaks a name.
+    Only a quoted string, a ``<kuid...>``, a number or a run of bytes spelled
+    out as ``b"..."`` can be a value, so a whole one of those says where the name
+    before it ends - which is what lets a name hold spaces: ``Scenery Objects
+    "<kuid2:401543:3220:1>,"``.  Text that merely starts as if it were one is not,
+    so neither the ``prose <not a kuid> here`` of a string value nor the ``"{`` of
+    a value running over the line below breaks a name.
     """
     if stripped.startswith('"'):
         return len(stripped) > 1 and stripped.endswith('"')
     if stripped.startswith("<"):
         return stripped.endswith(">")
+    if _a_binary_value_is_written_whole(stripped):
+        return True
     parts = stripped.split(",")
     return all(_A_NUMBER.fullmatch(part.strip()) for part in parts)
 
@@ -849,14 +1048,17 @@ def _a_value_is_written_whole(stripped: str) -> bool:
 def _the_name_end(stripped: str) -> int | None:
     """Where the name on this line ends, or nothing when nothing breaks it.
 
-    The first run of spaces after which a whole value stands is the break
-    between a name and its value; the spaces in ``Scenery Objects`` are followed
-    by ``Objects``, which starts no value, so they belong to the name.  A line
-    with no such break - ``kind scenery`` - keeps the older reading, its first
-    word the name and everything after it the value.
+    The first run of spaces a value can start on is the break between a name and
+    its value; the spaces in ``Scenery Objects`` are followed by ``Objects``,
+    which starts no value, so they belong to the name.  A run of bytes written
+    ``b"..."`` breaks a name even when its closing quote is missing, because
+    what is written after the ``b`` belongs to the value and not to a name.  A
+    line with no such break - ``kind scenery`` - keeps the older reading, its
+    first word the name and everything after it the value.
     """
     for gap in re.finditer(r"\s+", stripped):
-        if _a_value_is_written_whole(stripped[gap.end():]):
+        tail = stripped[gap.end():]
+        if _A_BINARY_MARKER.match(tail) or _a_value_is_written_whole(tail):
             return gap.start()
     return None
 
@@ -887,7 +1089,11 @@ def _split_name(stripped: str, brace_below: bool = False) -> tuple[str, str]:
         # all, is the container's name.  An odd number of quotes says the brace
         # belongs to a value instead, the ``{`` of ``k "{`` which carries on below
         name, rest = stripped[:-1].rstrip(), "{"
-    elif brace_below and not rest.startswith(('"', "<")):
+    elif (
+        brace_below
+        and not rest.startswith(('"', "<"))
+        and not _A_BINARY_MARKER.match(rest)
+    ):
         name, rest = stripped, ""
     else:
         end = _the_name_end(stripped)
@@ -969,6 +1175,12 @@ def find_problems(text: str) -> list[Problem]:
       is refused, because it leaves a kuid half written - ``<kuid:1:2`` and
       ``kuid:1:2>`` both read back as text without the brackets that make a
       kuid a kuid;
+    * a binary value written ``b"..."`` is checked as the run of bytes it is:
+      it has to close on the line it starts on, with every byte that is not an
+      ordinary character spelled out and its quote marks and backslashes
+      escaped, and a type written in front of it has to be one the text form has
+      no way of its own to write.  Left unchecked, a loose quote or a broken
+      escape would make the text stand for different bytes than the file held;
     * a name has to be written once in one container, so a second ``username``
       written beside the first, or a second ``kuid-table``, is refused.  A
       container holds one tag per name, so two of one name say contradictory
@@ -1073,6 +1285,13 @@ def _the_value_of(
 ) -> int:
     """The lines one value takes up, with every problem about it written down."""
     line = opened_at + 1
+    if _A_BINARY_MARKER.match(rest):
+        # the bytes written inside a binary value are only bytes: its quotes and
+        # backslashes are escaped, its other characters are spelled out, and it
+        # always ends on the line it starts, so nothing else is said about it
+        if not _a_binary_value_is_written_whole(rest):
+            problems.append(_what_is_wrong_with_a_binary_value(rest, name, line))
+        return index
     if rest.startswith('"'):
         if len(rest) > 1 and rest.endswith('"'):  # a one line string
             _add(problems, _unpaired_quotes(name, line, rest.count('"')))
@@ -1175,6 +1394,12 @@ def _parse_value_text(
     rest: str, lines: list[str], index: int, eol: str, name: str, opened_at: int
 ) -> tuple[object, int, int]:
     """A value from the text on its line, plus any continuation lines."""
+    if _A_BINARY_MARKER.match(rest):
+        # a run of bytes spelled out: always the whole value on one line, so
+        # the commas inside it are bytes and never a run of elements
+        value, value_type = _a_binary_value_written(rest, name, opened_at + 1)
+        return value, value_type, index
+
     if rest.startswith('"'):
         if len(rest) > 1 and rest.endswith('"'):  # a one line string
             return rest[1:-1], TagType.STRING, index
@@ -1228,6 +1453,9 @@ def _parse_value_text(
 def _parse_one_text(
     token: str, lines: list[str], index: int, eol: str, name: str, opened_at: int
 ) -> tuple[object, int, int]:
+    if _A_BINARY_MARKER.match(token):
+        value, value_type = _a_binary_value_written(token, name, opened_at + 1)
+        return value, value_type, index
     if token.startswith('"'):
         value, value_type, index = _parse_value_text(token, lines, index, eol, name, opened_at)
         return value, value_type, index

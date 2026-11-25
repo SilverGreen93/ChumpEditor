@@ -21,7 +21,9 @@ whole sort of name at once, every tag or every container, so the scanner says
 which sort it is looking at, which needs the line below, hence the ``following``
 argument.  A pair of the theme colours a value and never that name, which is how
 a name written ``<kuid2:1:2:3>`` is coloured as a name while the same thing
-after a space is coloured as a value.
+after a space is coloured as a value.  A run of bytes written ``b"..."`` is one
+value from end to end: the quote marks inside it are escaped and the rest of it
+is spelled out, so it is coloured as a whole and never read as words.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .chump import _split_name
+from .chump import _the_end_of_a_binary_value, _split_name
 from .theme import CONTAINERS, TAGS, Theme
 
 __all__ = ["Span", "scan_line", "STATE_NONE"]
@@ -80,6 +82,17 @@ def scan_line(
         position = _name_at_the_head(text, theme, following, spans)
 
     while position < len(text):
+        end = _the_end_of_a_binary_value(text, position)
+        if end >= 0:
+            # a run of bytes written out is one value, coloured as a whole: its
+            # own quote marks and backslashes are escaped, so none of the
+            # theme's pairs is tried against what stands between them
+            style = _the_style_of_a_binary_value(theme)
+            if style:
+                spans.append(Span(position, end - position, style))
+            position = end
+            continue
+
         opened = _opening_at(text, position, theme)
         if opened is not None:
             index, pair = opened
@@ -114,6 +127,19 @@ def _opening_at(text: str, position: int, theme: Theme) -> tuple[int, object] | 
     for index, pair in enumerate(theme.pairs):
         if pair.open and text.startswith(pair.open, position):
             return index, pair
+    return None
+
+
+def _the_style_of_a_binary_value(theme: Theme) -> str | None:
+    """The style a run of spelled out bytes wears: the one a quoted value wears.
+
+    The notation belongs to the format and not to a theme, so a theme that
+    colours what stands between a pair of quote marks colours these the same
+    way, and a theme that colours no quotes leaves them the colour of the text.
+    """
+    for pair in theme.pairs:
+        if pair.open == '"':
+            return pair.style
     return None
 
 

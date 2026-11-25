@@ -149,6 +149,55 @@ def test_a_pair_with_no_closing_string_covers_the_rest_of_the_line_only():
 
 
 # ---------------------------------------------------------------------------
+# a run of bytes spelled out as b"..."
+# ---------------------------------------------------------------------------
+
+def test_a_binary_value_is_one_value_from_end_to_end(theme):
+    """The quote marks inside ``b"..."`` are escaped and the rest is spelled out,
+    so the value is coloured whole: no word, number or bracket in it is read on
+    its own, and what follows it is coloured again."""
+    found, state = colours(r'kind b"a \"b" kind 1', theme)
+    assert found == [("kind", "words"), ('b"a \\"b"', "text"), ("kind", "words"), ("1", "digits")]
+    assert state == STATE_NONE
+
+
+def test_a_binary_value_wears_the_colour_of_a_quoted_value(theme):
+    """The notation belongs to the format and not to a theme, so a theme that
+    colours what stands between quote marks colours these the same way."""
+    assert colours('kind b"<part> kind"', theme)[0] == [
+        ("kind", "words"),
+        ('b"<part> kind"', "text"),
+    ]
+
+
+def test_a_binary_value_left_open_covers_the_rest_of_the_line_only(theme):
+    """A value spelled wrong is still one value to paint, and it never waits for
+    the line below: a binary value is always written on the line it starts on."""
+    found, state = colours('kind b"<part> ab', theme)
+    assert found == [("kind", "words"), ('b"<part> ab', "text")]
+    assert state == STATE_NONE
+
+
+def test_the_b_of_a_word_is_not_the_start_of_a_binary_value(theme):
+    """A value starts only where a value can start, so the ``b"`` in the middle of
+    a word is left to the theme, which colours its quote marks as any others."""
+    assert colours('kind ab"x"', theme)[0] == [("kind", "words"), ('"x"', "text")]
+
+
+def test_a_binary_value_in_a_theme_that_colours_no_quote():
+    """A theme with nothing to colour the value with leaves it the colour of the
+    text, and still does not read the bytes inside it as words or brackets."""
+    theme = parse_theme(
+        {
+            "styles": {"default": "#000000", "words": "#0000ff", "part": "#ff0080"},
+            "pairs": [{"style": "part", "open": "<", "close": ">"}],
+            "keywords": [{"style": "words", "words": ["kind"]}],
+        }
+    )
+    assert colours('kind b"<part>"', theme)[0] == [("kind", "words")]
+
+
+# ---------------------------------------------------------------------------
 # a family of tags written as one pattern, and written for a language
 # ---------------------------------------------------------------------------
 

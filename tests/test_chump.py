@@ -735,8 +735,10 @@ def test_render_an_empty_container():
 
 
 def test_render_a_binary_value_as_the_bytes_it_holds():
-    assert render_text(Tag("<root>", [Tag("b", (), b"ab", BINARY)])) == (
-        "\r\nb" + " " * 39 + "ab\r\n"
+    """A binary value is spelled out, so the text says the same bytes rather
+    than whatever they happen to look like read as text."""
+    assert render_text(Tag("<root>", [Tag("b", (), b'ab"\x00', BINARY)])) == (
+        "\r\nb" + " " * 39 + 'b"ab\\"\\x00"\r\n'
     )
 
 
@@ -797,13 +799,109 @@ def test_the_float32_values_of_a_chump_file_are_written_with_a_decimal_point():
 
 
 def test_a_value_of_a_type_the_reader_does_not_know_is_written_back_as_it_came():
-    # the text form cannot say what the bytes meant, so they go out verbatim,
-    # the way the original expander wrote them; the tag keeps its type byte
-    text = render_text(Tag("<root>", [Tag("k", (), RawValue(0x08, b"ab"), 0x08)]))
-    assert text.endswith("k" + " " * 39 + "ab\r\n")
-    again = parse_chump(pack_chump(Tag("<root>", [Tag("k", (), RawValue(0x08, b"ab"), 0x08)])))
+    """The type byte stands in front of the bytes so the text can say what they
+    were: a type 0x08 goes out as ``08b"..."`` and comes back type 0x08."""
+    root = Tag("<root>", [Tag("k", (), RawValue(0x08, b"ab"), 0x08)])
+    text = render_text(root)
+    assert text.endswith("k" + " " * 39 + '08b"ab"\r\n')
+    through = parse_text(text).tags[0]
+    assert (through.value_type, through.value) == (0x08, RawValue(0x08, b"ab"))
+    again = parse_chump(pack_chump(root))
     assert again.tags[0].value_type == 0x08
     assert again.tags[0].value.data == b"ab"
+
+
+def test_the_bytes_of_a_binary_value_come_back_as_the_same_bytes():
+    """Every one of the 256 bytes is either written as itself or spelled out, so
+    a mesh packed into a tag survives the text form untouched."""
+    blob = bytes(range(256))
+    root = Tag("<root>", [Tag("k", (), blob, BINARY)])
+    text = render_text(root)
+    tag = parse_text(text).tags[0]
+    assert (tag.value_type, tag.value) == (BINARY, blob)
+    assert pack_chump(parse_text(text)) == pack_chump(root)
+
+
+@pytest.mark.parametrize(
+    "blob", [b"", b"a", b'a"b', b"a\\b", b"a,b c", b"\x00\xff", b"\\", b'\\"']
+)
+def test_a_binary_value_holding_a_tricky_byte_reads_back_whole(blob):
+    """A quote mark and a backslash carry a backslash of their own so the value
+    has one clear end, and every other byte that is not an ordinary character is
+    spelled out as ``\\xNN``."""
+    text = render_text(Tag("<root>", [Tag("k", (), blob, BINARY)]))
+    assert parse_text(text).tags[0].value == blob
+
+
+def test_the_commas_in_a_binary_value_are_bytes_and_not_a_run_of_elements():
+    """A run of bytes is one value written on one line, so what is written inside
+    it is never split on commas the way ``1,2,3`` is."""
+    tag = parse_text("k" + " " * 39 + 'b"a,b c"').tags[0]
+    assert (tag.value_type, tag.value) == (BINARY, b"a,b c")
+    assert find_problems("k" + " " * 39 + 'b"a,b c"') == []
+
+
+def test_a_binary_value_needs_no_comment():
+    """The bytes inside a spelled out value are only bytes: an angle bracket, a
+    keyword or a run of numbers in there say nothing about the file."""
+    text = "k" + " " * 39 + 'b"<kuid:1:2> 1,2 kind"'
+    assert find_problems(text) == []
+    assert parse_text(text).tags[0].value == b"<kuid:1:2> 1,2 kind"
+
+
+@pytest.mark.parametrize(
+    "written, wrong",
+    [
+        ('b"ab', "is never closed"),
+        ('b"a\\"', "is never closed"),
+        (r'b"a\qb"', "has a backslash that escapes nothing"),
+        (r'b"a\xZZ"', "has a backslash that escapes nothing"),
+        ('b"a"b"', "has a quote mark that is not escaped"),
+        ('b"a\x01b"', "has a character that has to be spelled out"),
+    ],
+)
+def test_a_binary_value_spelled_wrong_is_refused(written, wrong):
+    """A value that does not read back as the bytes it looks like is refused
+    rather than written out again as something else."""
+    text = "k" + " " * 39 + written
+    with pytest.raises(ChumpError, match=wrong):
+        parse_text(text)
+    assert wrong in find_problems(text)[0].message
+
+
+def test_a_binary_value_never_runs_over_into_the_line_below():
+    """A raw newline is never written inside the value, so the line after a binary
+    tag is the next tag and not the rest of the bytes."""
+    text = "k" + " " * 39 + 'b"a,b"\r\nother' + " " * 35 + "1"
+    tags = parse_text(text).tags
+    assert [(one.name, one.value) for one in tags] == [("k", b"a,b"), ("other", 1)]
+
+
+@pytest.mark.parametrize("spelled", ["00", "01", "02", "03", "05", "06", "0d"])
+def test_a_binary_value_needs_no_type_the_text_form_writes_itself(spelled):
+    """Only a type the reader does not know is spelled out in front of the bytes:
+    writing out one the text form has its own notation for leaves the bytes to be
+    read again as a number or a kuid, which is not what they are."""
+    text = "k" + " " * 39 + f'{spelled}b"ab"'
+    with pytest.raises(ChumpError, match="writes a value of its own for"):
+        parse_text(text)
+    assert "writes a value of its own for" in find_problems(text)[0].message
+    with pytest.raises(ChumpError, match="cannot write a value of type"):
+        render_text(Tag("<root>", [Tag("k", (), RawValue(int(spelled, 16), b"ab"), int(spelled, 16))]))
+
+
+def test_a_binary_value_may_write_its_own_type_out_and_means_the_same():
+    """A binary tag spelling out its own type byte says what it already is."""
+    tag = parse_text("k" + " " * 39 + '04b"ab"').tags[0]
+    assert (tag.value_type, tag.value) == (BINARY, b"ab")
+
+
+def test_a_binary_value_says_where_a_name_holding_spaces_ends():
+    """The ``b`` opening a run of bytes starts a value even when its closing quote
+    is missing, so the name before it is read whole either way."""
+    text = "Scenery Objects" + " " * 21 + 'b"a b"'
+    assert parse_text(text).tags[0].name == "Scenery Objects"
+    assert find_problems(text) == []
 
 
 # --------------------------------------------------------------------------
