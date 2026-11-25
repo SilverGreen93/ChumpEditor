@@ -20,6 +20,11 @@ literal words, so a family of tags written ``category-era-0``, ``category-era-1`
 and on takes one line rather than one entry each.  A theme can also say that a
 tag ending in a two letter language suffix - ``description-ru`` - is coloured as
 the tag it is written after.  ``scan.py`` is what applies both.
+
+A list may name no word at all and stand for a whole sort of name instead:
+``"all": "tags"`` colours the name of every tag, ``"all": "containers"`` the name
+of every container.  Naming a word says more than naming a sort of name, so where
+a name is covered both ways the word decides the colour.
 """
 
 from __future__ import annotations
@@ -32,7 +37,10 @@ from pathlib import Path
 from .paths import config_dir
 
 __all__ = [
+    "CONTAINERS",
+    "COVERED",
     "DEFAULT_THEME",
+    "TAGS",
     "Theme",
     "ThemeError",
     "bundled_theme_path",
@@ -51,6 +59,14 @@ DEFAULT_THEME = "trainz.json"
 #: every two letter language code is not something this program could keep up
 #: to date, and a wrong guess only means a tag stays its default colour.
 _LANGUAGE_SUFFIX = re.compile(r"-[A-Za-z]{2}$")
+
+#: a keyword list may cover a whole sort of name instead of naming any word:
+#: the name a tag carries, and the name a container carries
+TAGS = "tags"
+CONTAINERS = "containers"
+
+#: every sort of name a theme may cover, as the theme file has to spell it
+COVERED = (TAGS, CONTAINERS)
 
 
 class ThemeError(ValueError):
@@ -88,16 +104,22 @@ class Pair:
 
 @dataclass(frozen=True)
 class Keywords:
-    """One style, and the words and the patterns that wear it.
+    """One style, and the words, patterns and sort of name that wear it.
 
     ``patterns`` are regular expressions tried against a whole word, never part
     of one, which is what lets a family of tags - ``category-era-0``,
     ``category-era-1``, and however many more - be written as one line.
+
+    ``all`` names a sort of name instead of any word: ``TAGS`` colours the name
+    of every tag, ``CONTAINERS`` the name of every container.  Words and patterns
+    are tried first whoever lists them, so a list that covers a whole sort only
+    decides the colour of the names nobody spelled out.
     """
 
     style: str
     words: tuple[str, ...] = ()
     patterns: tuple[str, ...] = ()
+    all: str = ""
 
 
 @dataclass(frozen=True)
@@ -118,6 +140,9 @@ class Theme:
     #: each pattern of the keyword lists, compiled, with the style it gives;
     #: tried in the order the theme lists them, and the first one wins
     matchers: tuple[tuple[re.Pattern[str], str], ...] = field(default_factory=tuple, compare=False)
+    #: each sort of name and the style of the first list that covers it, so
+    #: ``roles[TAGS]`` is the colour of a tag no list of words mentions
+    roles: dict[str, str] = field(default_factory=dict, compare=False)
 
     def __post_init__(self) -> None:
         if not self.words:
@@ -129,6 +154,14 @@ class Theme:
                     key = word if self.case_sensitive else word.lower()
                     table[key] = group.style
             object.__setattr__(self, "words", table)
+        if not self.roles:
+            # walked forwards this time: a name of this sort keeps the style of
+            # the first list that says so
+            object.__setattr__(
+                self,
+                "roles",
+                {group.all: group.style for group in reversed(self.keywords) if group.all},
+            )
         if not self.matchers:
             flags = 0 if self.case_sensitive else re.IGNORECASE
             object.__setattr__(
@@ -145,20 +178,28 @@ class Theme:
         """The style named by a rule; the default covers anything unaccounted for."""
         return self.styles.get(id) or self.styles.get("default", Style("default"))
 
-    def keyword_style(self, word: str) -> str | None:
-        """The style a whole word asks for, or nothing when no rule covers it.
+    def keyword_style(self, word: str, role: str = "") -> str | None:
+        """The style one name asks for, or nothing when no rule covers it.
 
-        The lists of words are tried before the patterns, so a theme can still
-        pick one member of a family out and colour it another way.  A theme that
-        counts language suffixes tries once more with a trailing ``-ru`` style
-        tail taken off, which is how a tag written for one language is coloured
-        as the tag it belongs to.
+        ``role`` says what kind of name this is - ``TAGS`` or ``CONTAINERS`` -
+        which only ``scan.py`` can tell from the way the line is written; leave
+        it out to ask about a word on its own.  The lists of words are tried
+        before the patterns, so a theme can still pick one member of a family
+        out and colour it another way, and both are tried before a list that
+        covers a whole sort of name, since naming one word says more than naming
+        everything of a kind.  A theme that counts language suffixes tries once
+        more with a trailing ``-ru`` style tail taken off, which is how a tag
+        written for one language is coloured as the tag it belongs to.
         """
         style = self._style_of_word(word)
-        if style or not self.language_suffixes:
+        if style:
             return style
-        base = _LANGUAGE_SUFFIX.sub("", word)
-        return self._style_of_word(base) if base != word else None
+        if self.language_suffixes:
+            base = _LANGUAGE_SUFFIX.sub("", word)
+            style = self._style_of_word(base) if base != word else None
+            if style:
+                return style
+        return self.roles.get(role)
 
     def _style_of_word(self, word: str) -> str | None:
         """One word against the lists, and then against the patterns."""
@@ -340,6 +381,12 @@ def _keywords(data: object, styles: dict[str, Style], origin: str) -> tuple[Keyw
             raise ThemeError(f"{origin}: the words of {style!r} are a list")
         written = entry.get("patterns", [])
         patterns = _as_list([written] if isinstance(written, str) else written, "patterns", origin)
+        every = str(entry.get("all") or "")
+        if every and every not in COVERED:
+            raise ThemeError(
+                f"{origin}: {style!r} covers a sort of name that is not one of"
+                f" {', '.join(COVERED)}: {every!r}"
+            )
         sources = tuple(str(pattern) for pattern in patterns)
         for pattern in sources:
             try:
@@ -354,6 +401,7 @@ def _keywords(data: object, styles: dict[str, Style], origin: str) -> tuple[Keyw
                 style=style,
                 words=tuple(str(word) for word in words),
                 patterns=sources,
+                all=every,
             )
         )
     return tuple(groups)
@@ -361,8 +409,13 @@ def _keywords(data: object, styles: dict[str, Style], origin: str) -> tuple[Keyw
 
 def _keywords_as_written(group: Keywords) -> dict:
     """One keyword list in the form the file holds it: the patterns only when
-    the list has any, so a theme of plain words stays as short as it was."""
-    written = {"style": group.style, "words": list(group.words)}
+    the list has any, and the sort of name only when it covers one, so a theme of
+    plain words stays as short as it was."""
+    written = {"style": group.style}
+    if group.all:
+        written["all"] = group.all
+    if group.words or not group.all:
+        written["words"] = list(group.words)
     if group.patterns:
         written["patterns"] = list(group.patterns)
     return written

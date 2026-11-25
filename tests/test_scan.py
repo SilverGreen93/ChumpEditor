@@ -42,9 +42,13 @@ def theme() -> Theme:
     return parse_theme(json.loads(TEXT))
 
 
-def colours(text: str, theme: Theme, state: int = STATE_NONE):
-    """Which style covers which stretch of this line, and what it leaves open."""
-    spans, state = scan_line(text, theme, state)
+def colours(text: str, theme: Theme, state: int = STATE_NONE, following: str = ""):
+    """Which style covers which stretch of this line, and what it leaves open.
+
+    ``following`` is the line below, which is how a theme that colours every
+    container finds out that this line's name has a brace after it.
+    """
+    spans, state = scan_line(text, theme, state, following)
     return [(text[span.start : span.start + span.length], span.style) for span in spans], state
 
 
@@ -119,8 +123,9 @@ def test_a_pair_left_open_at_the_end_of_a_line_carries_on(theme):
     assert state == STATE_NONE
 
 
-def test_a_line_inside_a_pair_left_open_still_closes_it(theme):
-    _, state = colours("<kind", theme)
+def test_a_pair_left_open_in_a_value_carries_on_and_closes_later(theme):
+    """A bracket left open in a value runs on, the way a license string does."""
+    _, state = colours("kuid <kind", theme)
     assert state == 1
 
     found, state = colours("cart>", theme, state)
@@ -203,3 +208,125 @@ def test_a_family_tag_inside_a_value_is_part_of_the_value(families):
         ("description-ru", "words"),
         ('"category-era-9"', "text"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# the name a line starts with, and the whole sort of name it belongs to
+# ---------------------------------------------------------------------------
+
+SORTS = """
+{
+  "name": "sorts scan",
+  "styles": {
+    "default": {"colour": "#000000"},
+    "tags": {"colour": "#0000ff"},
+    "containers": {"colour": "#800000"},
+    "odd": {"colour": "#ff0000"},
+    "text": {"colour": "#008000"},
+    "part": {"colour": "#ff0080"}
+  },
+  "pairs": [
+    {"style": "text", "open": "\\"", "close": "\\""},
+    {"style": "part", "open": "<", "close": ">"}
+  ],
+  "keywords": [
+    {"style": "odd", "words": ["origin"]},
+    {"style": "tags", "all": "tags"},
+    {"style": "containers", "all": "containers"}
+  ]
+}
+"""
+
+
+@pytest.fixture
+def sorts() -> Theme:
+    return parse_theme(json.loads(SORTS))
+
+
+def test_a_name_at_the_start_of_a_line_is_a_tag(sorts):
+    assert colours("a-name-nobody-mentioned", sorts)[0] == [("a-name-nobody-mentioned", "tags")]
+
+
+def test_a_name_inside_a_value_is_not_a_name_of_a_sort(sorts):
+    """Only the name the line starts with can be one; what follows is a value."""
+    assert colours('kind a-name-nobody-mentioned', sorts)[0] == [("kind", "tags")]
+
+
+def test_a_name_with_a_brace_after_it_is_a_container(sorts):
+    assert colours("kuid-table {", sorts)[0] == [("kuid-table", "containers")]
+    assert colours("  mesh-table\t{", sorts)[0] == [("mesh-table", "containers")]
+    assert colours("mesh-table{", sorts)[0] == [("mesh-table", "containers")]
+
+
+def test_a_name_with_a_brace_on_the_line_below_is_a_container(sorts):
+    assert colours("mesh-table", sorts, following="{")[0] == [("mesh-table", "containers")]
+    assert colours("  default", sorts, STATE_NONE, "  {")[0] == [("default", "containers")]
+
+
+def test_a_name_with_nothing_after_it_is_only_a_tag(sorts):
+    """A name on its own is a tag with no value, unless the line below opens
+    something; a value on the line below changes nothing."""
+    assert colours("mesh-table", sorts, following="")[0] == [("mesh-table", "tags")]
+    assert colours("mesh-table", sorts, following="}")[0] == [("mesh-table", "tags")]
+    assert colours("kind", sorts, following='"scenery"')[0] == [("kind", "tags")]
+
+
+def test_the_name_of_a_sort_never_colours_the_value_after_it(sorts):
+    assert colours("origin-table origin", sorts)[0] == [
+        ("origin-table", "tags"),
+        ("origin", "odd"),
+    ]
+
+
+def test_a_word_the_theme_named_outranks_the_sort_of_name_it_is(sorts):
+    assert colours("origin-table", sorts, following="{")[0] == [("origin-table", "containers")]
+    assert colours("origin", sorts)[0] == [("origin", "odd")]
+
+
+def test_a_name_written_with_a_dot_in_it_is_one_name(sorts):
+    """Only a space separates a name from its value, so every other symbol -
+    the dot here - is part of the name, and the name is coloured all of a piece."""
+    assert colours("junction.forward", sorts)[0] == [("junction.forward", "tags")]
+    assert colours("  junction.forward 1", sorts)[0] == [("junction.forward", "tags")]
+
+
+def test_a_name_written_with_a_colon_after_it_is_still_one_name(sorts):
+    """The older spelling ``name: value``, which ``chump`` reads the same way;
+    the colon is not part of the name, so the name keeps the colour it asks for."""
+    assert colours("origin: 1", sorts)[0] == [("origin", "odd")]
+    assert colours("junction.forward: 1", sorts)[0] == [("junction.forward", "tags")]
+
+
+def test_a_name_written_in_brackets_is_a_name_and_not_a_pair(sorts):
+    """A kuid table names each asset it holds with a bracketed kuid, and a name
+    is a name however it is spelled: the pairs colour a value, never a name."""
+    assert colours("<kuid2:66277:35027:1>", sorts)[0] == [("<kuid2:66277:35027:1>", "tags")]
+    assert colours("<kuid2:66277:35027:1> {", sorts)[0] == [
+        ("<kuid2:66277:35027:1>", "containers")
+    ]
+    assert colours("<kuid2:66277:35027:1>", sorts, following="{")[0] == [
+        ("<kuid2:66277:35027:1>", "containers")
+    ]
+
+
+def test_a_pair_still_colours_a_value_written_after_the_name(sorts):
+    assert colours("kuid <kuid2:66277:35027:1>", sorts)[0] == [
+        ("kuid", "tags"),
+        ("<kuid2:66277:35027:1>", "part"),
+    ]
+    assert colours('<kuid2:66277:35027:1> "The asset"', sorts)[0] == [
+        ("<kuid2:66277:35027:1>", "tags"),
+        ('"The asset"', "text"),
+    ]
+
+
+def test_a_name_may_be_written_as_a_number(sorts):
+    """Whatever stands before the first space is the name, digits or no digits;
+    a value is only ever what follows one."""
+    assert colours("42", sorts)[0] == [("42", "tags")]
+    assert colours("2.7 1", sorts)[0] == [("2.7", "tags")]
+
+
+def test_a_brace_is_not_a_name_of_a_sort(sorts):
+    assert colours("{", sorts)[0] == []
+    assert colours("}", sorts)[0] == []

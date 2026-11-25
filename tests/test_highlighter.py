@@ -26,19 +26,20 @@ from chumpeditor.theme import bundled_theme_path, load_theme, parse_theme  # noq
 #: the colours of the theme that ships, spelled out so a test can say which
 #: part of a line it expected rather than which number it saw
 PLAIN = "#000000"
-WORDS = "#0000ff"
-OTHER = "#800000"
-FAMILY = "#ff0000"
+TAGS = "#0000ff"
+CONTAINERS = "#800000"
+OBSOLETE = "#ff0000"
 STRING = "#008000"
-SECTION = "#ff0080"
+KUID = "#ff0080"
 
 #: the same theme on a dark background, which is what each of those colours has
 #: to become for the text to be readable at all
 DARK_PLAIN = "#ffffff"
-DARK_WORDS = "#3fd0e0"
-DARK_OTHER = "#ff9e64"
+DARK_TAGS = "#3fd0e0"
+DARK_CONTAINERS = "#ff9e64"
+DARK_OBSOLETE = "#ff5f5f"
 DARK_STRING = "#7ac74f"
-DARK_SECTION = "#ff6fb0"
+DARK_KUID = "#ff6fb0"
 
 
 @pytest.fixture(scope="module")
@@ -102,11 +103,11 @@ def shown(widget: RichTextEditor) -> list[list[tuple[str, str]]]:
     """The same, with the numbers replaced by the parts of the theme they came from."""
     named = {
         PLAIN: "plain",
-        WORDS: "words",
-        OTHER: "other",
-        FAMILY: "family",
+        TAGS: "tags",
+        CONTAINERS: "containers",
+        OBSOLETE: "obsolete",
         STRING: "string",
-        SECTION: "section",
+        KUID: "kuid",
     }
     return [
         [(text, named.get(colour, colour)) for text, colour in line]
@@ -119,58 +120,105 @@ def shown(widget: RichTextEditor) -> list[list[tuple[str, str]]]:
 # ---------------------------------------------------------------------------
 
 
-def test_the_words_of_the_theme_are_coloured_and_the_rest_is_left_plain(editor):
+def test_the_names_of_the_theme_are_coloured_and_the_rest_is_left_plain(editor):
     editor.setPlainText("kind")
-    assert shown(editor) == [[("kind", "words")]]
+    assert shown(editor) == [[("kind", "tags")]]
 
 
 def test_a_value_in_quotes_is_one_colour_right_across_it(editor):
     editor.setPlainText('kind "cart"')
     assert shown(editor) == [
-        [("kind", "words"), (" ", "plain"), ('"cart"', "string")]
+        [("kind", "tags"), (" ", "plain"), ('"cart"', "string")]
     ]
 
 
 def test_a_word_inside_quotes_is_part_of_the_value(editor):
     """The theme has a rule for both, and the quotes are the one that counts."""
-    editor.setPlainText('name "kind"')
+    editor.setPlainText('name "origin"')
     assert shown(editor) == [
-        [("name", "words"), (" ", "plain"), ('"kind"', "string")]
+        [("name", "tags"), (" ", "plain"), ('"origin"', "string")]
     ]
 
 
-def test_the_two_lists_of_words_are_two_colours(editor):
-    editor.setPlainText("kuid-table kuid")
+def test_a_container_is_a_colour_of_its_own(editor):
+    """The brace on the name's own line is what says this name opens one."""
+    editor.setPlainText("mesh-table {")
+    assert shown(editor) == [[("mesh-table", "containers"), (" {", "plain")]]
+
+
+def test_a_container_with_the_brace_on_the_line_below_is_the_same_colour(editor):
+    """The other way a config.txt writes it, and the only way to know it is to
+    read the line below as well."""
+    editor.setPlainText("mesh-table\n{")
     assert shown(editor) == [
-        [("kuid-table", "other"), (" ", "plain"), ("kuid", "words")]
+        [("mesh-table", "containers")],
+        [("{", "plain")],
     ]
 
 
-def test_a_tag_numbered_past_the_ones_the_theme_lists_is_still_coloured(editor):
-    """The theme writes a family of tags as one pattern, so an asset's seventh
-    camera and its era 9 are coloured without anyone adding a line."""
-    editor.setPlainText("car25 category-era-9")
+def test_a_name_with_a_value_and_no_brace_is_a_tag_however_it_is_spelled(editor):
+    editor.setPlainText("a-name-nobody-has-mentioned 2.5")
     assert shown(editor) == [
-        [("car25", "words"), (" ", "plain"), ("category-era-9", "family")]
+        [("a-name-nobody-has-mentioned", "tags"), (" 2.5", "plain")]
     ]
+
+
+def test_a_name_with_a_dot_in_it_is_coloured_all_of_a_piece(editor):
+    """Only a space separates a name from its value, so the dot of
+    junction.forward is part of the name rather than something to stop at."""
+    editor.setPlainText("junction.forward 1")
+    assert shown(editor) == [[("junction.forward", "tags"), (" 1", "plain")]]
+
+
+def test_a_tag_named_with_a_kuid_is_coloured_as_a_tag(editor):
+    """A kuid table names each asset it holds with a kuid, and a name is coloured
+    for being a name: the kuid rule colours a value, never the name before it."""
+    editor.setPlainText("<kuid2:66277:35027:1>\nkuid <kuid2:66277:35027:1>")
+    assert shown(editor) == [
+        [("<kuid2:66277:35027:1>", "tags")],
+        [("kuid", "tags"), (" ", "plain"), ("<kuid2:66277:35027:1>", "kuid")],
+    ]
+
+
+def test_a_tag_nobody_uses_any_more_is_marked_however_it_is_numbered(editor):
+    """The one list of the shipped theme that still names words, because only a
+    word can say that a tag is out of date - and Trainz numbers these as far as
+    it likes, so era 9 and icon 3 take one pattern each rather than a line."""
+    editor.setPlainText("origin category-era-9 icon3")
+    assert shown(editor) == [
+        [
+            ("origin", "obsolete"),
+            (" ", "plain"),
+            ("category-era-9", "obsolete"),
+            (" ", "plain"),
+            ("icon3", "obsolete"),
+        ]
+    ]
+
+
+def test_a_word_the_theme_named_outranks_the_sort_of_name_it_is(editor):
+    """car15 to car20 are spelled out among the tags nobody uses; the rest of
+    the family is a tag like any other."""
+    editor.setPlainText("car17\ncar25")
+    assert shown(editor) == [[("car17", "obsolete")], [("car25", "tags")]]
 
 
 def test_a_tag_written_for_a_language_takes_the_colour_of_its_tag(editor):
-    editor.setPlainText("description-ru")
-    assert shown(editor) == [[("description-ru", "words")]]
+    editor.setPlainText("icon-texture-ru")
+    assert shown(editor) == [[("icon-texture-ru", "obsolete")]]
 
 
 def test_a_section_in_angle_brackets_is_one_colour(editor):
-    editor.setPlainText("<kuid:123:456> kuid")
+    editor.setPlainText("kuid <kuid:123:456>")
     assert shown(editor) == [
-        [("<kuid:123:456>", "section"), (" ", "plain"), ("kuid", "words")]
+        [("kuid", "tags"), (" ", "plain"), ("<kuid:123:456>", "kuid")]
     ]
 
 
 def test_a_value_that_runs_over_several_lines_stays_one_value(editor):
     editor.setPlainText('license "one\ntwo\nthree" end')
     assert shown(editor) == [
-        [("license", "words"), (" ", "plain"), ('"one', "string")],
+        [("license", "tags"), (" ", "plain"), ('"one', "string")],
         [("two", "string")],
         [('three"', "string"), (" end", "plain")],
     ]
@@ -178,13 +226,13 @@ def test_a_value_that_runs_over_several_lines_stays_one_value(editor):
 
 def test_nothing_is_coloured_that_the_theme_says_nothing_about(editor):
     editor.setPlainText("nonsense 2.7 { = }")
-    assert shown(editor) == [[("nonsense 2.7 { = }", "plain")]]
+    assert shown(editor) == [[("nonsense", "tags"), (" 2.7 { = }", "plain")]]
 
 
 def test_the_colours_are_the_ones_the_shipped_theme_writes(editor):
     theme = load_theme(bundled_theme_path())
-    assert theme.styles["keywords1"].colour == WORDS
-    assert theme.styles["delimiters1"].colour == STRING
+    assert theme.styles["tags"].colour == TAGS
+    assert theme.styles["delim_str"].colour == STRING
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +242,33 @@ def test_the_colours_are_the_ones_the_shipped_theme_writes(editor):
 
 def test_a_word_typed_in_is_coloured_as_soon_as_it_is_there(editor):
     editor.insertPlainText("kind")
-    assert shown(editor) == [[("kind", "words")]]
+    assert shown(editor) == [[("kind", "tags")]]
 
     editor.insertPlainText(" cart")
-    assert shown(editor) == [[("kind", "words"), (" cart", "plain")]]
+    assert shown(editor) == [[("kind", "tags"), (" cart", "plain")]]
+
+
+def test_a_brace_typed_below_a_name_colours_the_name_as_a_container(editor):
+    """A name is only known to open a container by the brace below it, so the
+    name has to change colour when the brace arrives."""
+    editor.setPlainText("mesh-table\n")
+    assert shown(editor)[0] == [("mesh-table", "tags")]
+
+    editor.moveCursor(QTextCursor.MoveOperation.End)
+    editor.insertPlainText("{")
+    assert shown(editor)[0] == [("mesh-table", "containers")]
+
+
+def test_taking_the_brace_away_makes_the_name_a_tag_again(editor):
+    editor.setPlainText("mesh-table\n{")
+    assert shown(editor)[0] == [("mesh-table", "containers")]
+
+    cursor = editor.textCursor()
+    cursor.movePosition(QTextCursor.MoveOperation.End)
+    cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+    cursor.deleteChar()
+    editor.setTextCursor(cursor)
+    assert shown(editor)[0] == [("mesh-table", "tags")]
 
 
 def test_typing_on_a_line_recolours_only_that_line(editor):
@@ -205,7 +276,7 @@ def test_typing_on_a_line_recolours_only_that_line(editor):
     editor.moveCursor(QTextCursor.MoveOperation.End)
     editor.insertPlainText("two")
     assert shown(editor) == [
-        [("license", "words"), (" ", "plain"), ('"onetwo', "string")]
+        [("license", "tags"), (" ", "plain"), ('"onetwo', "string")]
     ]
 
 
@@ -267,23 +338,26 @@ def test_the_plain_text_of_a_dark_editor_is_white_rather_than_black(editor):
     """Black on a dark background is the same colour, which is why a theme has
     to be able to say white."""
     on_dark(editor, True)
-    editor.setPlainText("nonsense")
-    assert painted(editor) == [[("nonsense", DARK_PLAIN)]]
+    editor.setPlainText("}")  # a brace is structure, which no rule colours
+    assert painted(editor) == [[("}", DARK_PLAIN)]]
 
 
 def test_a_dark_background_takes_the_dark_colour_of_every_style(editor):
     on_dark(editor, True)
-    editor.setPlainText('kind kuid-table "cart" <kuid:1:2>')
+    editor.setPlainText('kind\nmesh-table {\n}\nkuid <kuid:1:2> "cart" origin')
     assert painted(editor) == [
+        [("kind", DARK_TAGS)],
+        [("mesh-table", DARK_CONTAINERS), (" {", DARK_PLAIN)],
+        [("}", DARK_PLAIN)],
         [
-            ("kind", DARK_WORDS),
+            ("kuid", DARK_TAGS),
             (" ", DARK_PLAIN),
-            ("kuid-table", DARK_OTHER),
+            ("<kuid:1:2>", DARK_KUID),
             (" ", DARK_PLAIN),
             ('"cart"', DARK_STRING),
             (" ", DARK_PLAIN),
-            ("<kuid:1:2>", DARK_SECTION),
-        ]
+            ("origin", DARK_OBSOLETE),
+        ],
     ]
 
 
@@ -292,7 +366,7 @@ def test_a_light_background_takes_the_light_colours_back(editor):
     editor.setPlainText('kind "cart"')
     on_dark(editor, False)
     assert shown(editor) == [
-        [("kind", "words"), (" ", "plain"), ('"cart"', "string")]
+        [("kind", "tags"), (" ", "plain"), ('"cart"', "string")]
     ]
 
 
@@ -309,4 +383,4 @@ def test_a_theme_that_names_no_dark_colour_is_painted_the_same_way(editor):
     )
     on_dark(editor, True)
     editor.setPlainText("kind")
-    assert painted(editor) == [[("kind", WORDS)]]
+    assert painted(editor) == [[("kind", TAGS)]]

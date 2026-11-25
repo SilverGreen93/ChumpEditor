@@ -11,9 +11,17 @@ A style can be coloured twice, once for a light background and once for a dark
 one, and only one of them can be painted at a time: the editor says which by
 way of ``set_dark``, because the editor is the one that knows what colour it
 displays its text on.
+
+Qt hands over one line at a time, but a theme that colours every container needs
+to know what the line below says - the ``{`` that opens a container is often
+written on a line of its own - so the next line is passed to the scanner.  That
+answer can arrive after the line above was coloured, so a changed line sends its
+name above off to be coloured again, once the highlighter has finished with it.
 """
 
 from __future__ import annotations
+
+import re
 
 from PyQt6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 
@@ -21,6 +29,10 @@ from ..scan import scan_line
 from ..theme import Style, Theme
 
 __all__ = ["ThemeHighlighter"]
+
+#: a line holding one name and nothing else, which is the shape that a brace on
+#: the line below can turn into a container
+_NAME = re.compile(r"\s*[^\s{}]+\s*")
 
 
 def _format(style: Style, dark: bool = False) -> QTextCharFormat:
@@ -43,7 +55,12 @@ class ThemeHighlighter(QSyntaxHighlighter):
         #: which half of the theme is being painted: dark background or light
         self.dark = dark
         self.formats: dict[str, QTextCharFormat] = {}
+        #: whether a change is one of our own colours, which nobody has to answer
+        self._our_own = False
         self._make_formats()
+        #: connected after Qt connected its own, so this one runs once the line
+        #: that changed has been coloured; see _recolour_the_line_above
+        document.contentsChange.connect(self._recolour_the_line_above)
 
     def set_theme(self, theme: Theme) -> None:
         """Colour with a different theme, and recolour what is already there."""
@@ -71,9 +88,37 @@ class ThemeHighlighter(QSyntaxHighlighter):
         if plain is not None:  # the whole line first, so nothing keeps an old colour
             self.setFormat(0, len(text), plain)
 
-        spans, state = scan_line(text, self.theme, self.previousBlockState())
+        block = self.currentBlock()
+        below = block.next().text() if block.next().isValid() else ""
+        spans, state = scan_line(text, self.theme, self.previousBlockState(), below)
         for span in spans:
             format = self.formats.get(span.style, plain)
             if format is not None:
                 self.setFormat(span.start, span.length, format)
         self.setCurrentBlockState(state)
+
+    def _recolour_the_line_above(self, position: int, removed: int, added: int) -> None:
+        """Colour the line above again, when this one says what it really is.
+
+        A name with no value of its own is only known to be a container by the
+        ``{`` written on the line below it, so typing that brace, or removing it,
+        means colouring the name again - and Qt only colours the line that
+        changed.  This answers the document rather than the highlight pass, and
+        does so after the highlighter itself has coloured the line that changed:
+        the highlighter connects to the document after the document connects to
+        the highlighter, so this slot runs last.
+        """
+        if self._our_own or not (removed or added):
+            return  # our own colours changing, or nothing that changes the shape
+        document = self.document()
+        if document is None:
+            return
+        for at in {position, position + added}:
+            above = document.findBlock(at).previous()
+            if above.isValid() and _NAME.fullmatch(above.text()):
+                self._our_own = True
+                try:
+                    self.rehighlightBlock(above)
+                finally:
+                    self._our_own = False
+

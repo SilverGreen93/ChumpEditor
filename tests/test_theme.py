@@ -13,7 +13,9 @@ import pytest
 
 from chumpeditor import theme as module
 from chumpeditor.theme import (
+    CONTAINERS,
     DEFAULT_THEME,
+    TAGS,
     Keywords,
     Pair,
     Style,
@@ -81,33 +83,49 @@ def test_the_theme_that_comes_with_the_program_reads():
     assert theme.name == "Trainz Config"
     assert {style for style in theme.styles} == {
         "default",
-        "keywords1",
-        "keywords2",
-        "keywords3",
-        "delimiters1",
-        "delimiters2",
+        "tags",
+        "containers",
+        "obsolete",
+        "delim_str",
+        "delim_kuid",
     }
 
 
 def test_the_theme_that_comes_with_the_program_colours_words_and_strings():
     theme = default_theme()
-    assert theme.style("keywords1").colour == "#0000ff"
-    assert theme.words["kind"] == "keywords1"
+    assert theme.style("tags").colour == "#0000ff"
+    assert theme.roles == {"tags": "tags", "containers": "containers"}
     assert [pair.open for pair in theme.pairs] == ['"', "<"]
-    assert theme.style("keywords3").italic
+    assert theme.style("obsolete").italic
+
+
+def test_the_theme_that_comes_with_the_program_colours_names_by_what_they_are():
+    """Nothing is matched by an exact word except the tags nobody uses any more:
+    a name is coloured by being a tag or a container, however it is spelled."""
+    theme = default_theme()
+    assert theme.keyword_style("kind", TAGS) == "tags"
+    assert theme.keyword_style("a-tag-nobody-has-ever-mentioned", TAGS) == "tags"
+    assert theme.keyword_style("kuid-table", CONTAINERS) == "containers"
+    assert theme.keyword_style("a-container-nobody-has-ever-mentioned", CONTAINERS) == "containers"
+
+
+def test_the_theme_that_comes_with_the_program_marks_the_tags_that_are_obsolete():
+    """The one list that still says what a word is, because only a word can say
+    that a tag is no longer used - and it wins over the colour of every tag."""
+    theme = default_theme()
+    assert theme.keyword_style("origin", TAGS) == "obsolete"
+    assert theme.keyword_style("thumbnail", TAGS) == "obsolete"
+    assert theme.keyword_style("night", CONTAINERS) == "obsolete"
 
 
 def test_the_shipped_theme_writes_a_family_of_tags_as_one_pattern():
-    """A Trainz asset numbers these as far as it likes - era 7, car 31, camera
-    12 - and the theme has to follow without anyone adding a line."""
+    """A Trainz asset numbers these as far as it likes - era 7, icon 31 - and
+    the theme has to follow without anyone adding a line."""
     theme = default_theme()
-    assert theme.keyword_style("category-era-42") == "keywords3"
-    assert theme.keyword_style("category-region-11") == "keywords3"
-    assert theme.keyword_style("car25") == "keywords1"
-    assert theme.keyword_style("camera12") == "keywords1"
-    assert theme.keyword_style("icon9") == "keywords3"
-    assert theme.keyword_style("wave7-speed") == "keywords1"
-    assert theme.keyword_style("lod4") == "keywords2"
+    assert theme.keyword_style("category-era-42") == "obsolete"
+    assert theme.keyword_style("category-region-11") == "obsolete"
+    assert theme.keyword_style("icon9") == "obsolete"
+    assert theme.keyword_style("icon42", TAGS) == "obsolete"
 
 
 def test_the_shipped_theme_never_lists_a_tag_by_its_number():
@@ -116,14 +134,15 @@ def test_the_shipped_theme_never_lists_a_tag_by_its_number():
     theme = default_theme()
     listed = sorted(word for word in theme.words if any(digit in word for digit in "0123456789"))
     assert listed == ["car15", "car16", "car17", "car18", "car19", "car20"]
-    assert theme.keyword_style("car17") == "keywords3"
+    assert theme.keyword_style("car17") == "obsolete"
+    assert theme.keyword_style("car25", TAGS) == "tags"
 
 
 def test_the_shipped_theme_colours_a_tag_written_for_a_language():
     theme = default_theme()
     assert theme.language_suffixes
-    assert theme.keyword_style("description-ru") == "keywords1"
-    assert theme.keyword_style("username-de") == "keywords1"
+    assert theme.keyword_style("icon-texture-ru", TAGS) == "obsolete"
+    assert theme.keyword_style("description-ru", TAGS) == "tags"
 
 
 def test_the_bundled_theme_is_where_the_package_keeps_it():
@@ -405,6 +424,122 @@ def test_the_patterns_are_read_the_way_the_theme_counts_case():
     theme = parse_theme(json.loads(loose))
     assert theme.keyword_style("CATEGORY-ERA-9") == "words"
     assert theme.keyword_style("DESCRIPTION-ru") == "words"
+
+
+# ---------------------------------------------------------------------------
+# a whole sort of name coloured as one
+# ---------------------------------------------------------------------------
+
+ROLES = """
+{
+  "name": "sorts",
+  "styles": {
+    "default": "#000000", "tags": "#0000ff", "containers": "#800000", "odd": "#ff0000"
+  },
+  "keywords": [
+    {"style": "odd", "words": ["origin"], "patterns": ["icon[0-9]+"]},
+    {"style": "tags", "all": "tags"},
+    {"style": "containers", "all": "containers"}
+  ]
+}
+"""
+
+
+def test_a_keyword_list_may_stand_for_every_name_of_a_sort():
+    theme = parse_theme(json.loads(ROLES))
+    assert theme.keywords[1].all == TAGS
+    assert theme.roles == {"tags": "tags", "containers": "containers"}
+
+
+def test_a_sort_of_name_colours_a_name_the_theme_never_mentioned():
+    theme = parse_theme(json.loads(ROLES))
+    assert theme.keyword_style("anything-at-all", TAGS) == "tags"
+    assert theme.keyword_style("kuid-table", CONTAINERS) == "containers"
+
+
+def test_a_sort_of_name_says_nothing_about_the_other_sort():
+    """A name is only coloured by the sort it is, and asking about a word on its
+    own says nothing about either."""
+    theme = parse_theme(json.loads(ROLES))
+    assert theme.keyword_style("anything-at-all") is None
+    assert theme.keyword_style("kuid-table", TAGS) == "tags"
+    assert theme.keyword_style("anything-at-all", CONTAINERS) == "containers"
+
+
+def test_a_word_the_theme_named_outranks_the_sort_of_name_it_belongs_to():
+    """Saying one word says more than saying every name of a kind, whichever
+    order the theme lists them in."""
+    theme = parse_theme(json.loads(ROLES))
+    assert theme.keyword_style("origin", TAGS) == "odd"
+    assert theme.keyword_style("icon12", CONTAINERS) == "odd"
+
+
+def test_a_list_may_name_words_in_one_place_and_a_sort_of_name_in_another():
+    """The words are tried first whoever lists them, so the list that covers a
+    whole sort only colours the names nobody spelled out."""
+    theme = parse_theme(
+        {
+            "styles": {"default": "#000", "odd": "#ff0000", "tags": "#0000ff"},
+            "keywords": [
+                {"style": "odd", "words": ["origin"]},
+                {"style": "tags", "all": "tags"},
+            ],
+        }
+    )
+    assert theme.keyword_style("origin", TAGS) == "odd"
+    assert theme.keyword_style("anything-at-all", TAGS) == "tags"
+
+
+def test_a_list_gives_a_sort_of_name_its_own_colour_whatever_words_it_names():
+    """One list, one colour: the words only matter against a list that says more
+    about them, or one that covers the same sort of name later on."""
+    theme = parse_theme(
+        {
+            "styles": {"default": "#000", "odd": "#ff0000", "tags": "#0000ff"},
+            "keywords": [{"style": "odd", "words": ["origin"], "all": "tags"}],
+        }
+    )
+    assert theme.keyword_style("origin", TAGS) == "odd"
+    assert theme.keyword_style("anything-at-all", TAGS) == "odd"
+
+
+def test_the_first_list_to_cover_a_sort_of_name_decides_its_colour():
+    theme = parse_theme(
+        {
+            "styles": {"default": "#000", "first": "#0000ff", "second": "#ff0000"},
+            "keywords": [
+                {"style": "first", "all": "tags"},
+                {"style": "second", "all": "tags"},
+            ],
+        }
+    )
+    assert theme.keyword_style("anything-at-all", TAGS) == "first"
+
+
+def test_a_local_tag_is_coloured_before_the_sort_of_name_it_belongs_to():
+    loose = ROLES.replace('"name": "sorts",', '"name": "sorts", "languageSuffixes": true,')
+    theme = parse_theme(json.loads(loose))
+    assert theme.keyword_style("origin-ru", TAGS) == "odd"
+    assert theme.keyword_style("anything-at-all-ru", TAGS) == "tags"
+
+
+def test_a_theme_written_out_keeps_the_sort_of_name_it_covers(tmp_path):
+    theme = parse_theme(json.loads(ROLES))
+    target = save_theme(theme, tmp_path / "again.json")
+    assert json.loads(target.read_text(encoding="utf-8"))["keywords"][1] == {
+        "style": "tags",
+        "all": "tags",
+    }
+    again = load_theme(target)
+    assert again.roles == theme.roles
+    assert again.keyword_style("anything-at-all", TAGS) == "tags"
+
+
+def test_a_sort_of_name_that_is_not_one_of_the_two_says_so(tmp_path):
+    path = written(tmp_path, ROLES.replace('"all": "tags"', '"all": "values"'))
+    with pytest.raises(ThemeError) as caught:
+        load_theme(path)
+    assert "values" in str(caught.value)
 
 
 # ---------------------------------------------------------------------------

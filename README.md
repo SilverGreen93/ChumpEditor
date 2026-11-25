@@ -166,16 +166,17 @@ What gets coloured is a small JSON file, not something written into the program:
   "caseSensitive": true,
   "languageSuffixes": true,
   "styles": {
-    "default":     {"colour": "#000000", "dark": "#ffffff"},
-    "keywords1":   {"colour": "#0000ff", "dark": "#3fd0e0"},
-    "keywords3":   {"colour": "#ff0000", "italic": true, "dark": "#ff5f5f"},
-    "delimiters1": "#008000"
+    "default":    {"colour": "#000000", "dark": "#ffffff"},
+    "tags":       {"colour": "#0000ff", "dark": "#3fd0e0"},
+    "obsolete":   {"colour": "#ff0000", "italic": true, "dark": "#ff5f5f"},
+    "delim_str":  "#008000"
   },
-  "pairs":    [{"style": "delimiters1", "open": "\"", "close": "\""}],
+  "pairs":    [{"style": "delim_str", "open": "\"", "close": "\""}],
   "keywords": [
-    {"style": "keywords1", "words": ["kind", "kuid"],
-     "patterns": ["camera[0-9]+", "car[0-9]+",
-                  "wave[0-9]+-(magnitude|scale|speed)"]}
+    {"style": "obsolete", "words": ["origin", "reskin"],
+     "patterns": ["category-(era|region)-[0-9]+", "icon[0-9]+"]},
+    {"style": "tags",       "all": "tags"},
+    {"style": "containers", "all": "containers"}
   ],
   "numbers":  null
 }
@@ -185,6 +186,16 @@ Add a word to a list or change a colour and the next line is coloured by it. A
 pair with an empty `close` colours the rest of the line it starts on, a pair left
 open at the end of a line carries on into the next one, and inside a pair the
 pair's own colour wins over any keyword.
+
+Most of the colouring of a config file follows what a name *is* rather than which
+name it is, so a list may say `all` instead of naming any word: `"all": "tags"`
+colours the name of every tag, `"all": "containers"` the name of every container.
+A container is the one a `{` follows, on the same line or on the one below, which
+is how the file is read anyway; every other name at the start of a line is a tag.
+Naming words says more than naming a sort of name, so where a name is covered
+both ways the words decide the colour - which is how the shipped theme marks the
+tags Trainz no longer uses in red while every other tag is blue. Two lists may
+cover the same sort of name, in which case the first one wins.
 
 A list may give `patterns` instead of, or as well as, `words`: regular
 expressions tried against a whole word, never part of one. That is how a family
@@ -196,15 +207,16 @@ Python regular expressions, and inside JSON a backslash has to be doubled, so
 `[0-9]+` is easier to read than `\\d+`.
 
 `languageSuffixes` (off unless it says `true`) colours a tag ending in a two
-letter language code as the tag it is written after: `description-ru` and
-`description-ro` take the colour of `description`. Only the shape of the tail is
-checked, because a list of every language code is not something to keep up to
-date; a tag with nothing to borrow its colour from stays plain.
+letter language code as the tag it is written after: `icon-texture-ru` and
+`icon-texture-ro` take the colour of `icon-texture`, which is one of the tags
+Trainz no longer uses. Only the shape of the tail is checked, because a list of
+every language code is not something to keep up to date, and a tag with nothing
+to borrow its colour from falls back on the colour of its sort of name.
 
 A style can also name a `dark` colour, which is what it becomes when the desktop
 is dark. Blue that is readable on white is nearly invisible on a dark editor, and
 black text on a black background is simply missing, so the shipped theme answers
-every style twice - the keyword blue, for instance, is cyan `#3fd0e0` in a dark
+every style twice - the tag blue, for instance, is cyan `#3fd0e0` in a dark
 editor. The editor decides which half to paint from the colour behind its own
 text, so it follows the desktop as it goes dark or light. A style that names no
 `dark` colour is painted with the one it has either way.
