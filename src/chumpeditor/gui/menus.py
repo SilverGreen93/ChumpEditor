@@ -6,8 +6,10 @@ rules themselves stay in ``document.py`` and the tidy-ups of the text in
 ``tweaks.py``, where the command line can follow them too.
 
 Actions are named out loud rather than given Qt's standard roles because the
-two save commands are not the same thing: *Save chump* packs the text back
-into a binary file, *Export txt* writes the indented text form.
+two write commands are not the same thing: one packs the text back into a
+binary file, the other writes the indented text form.  Which of them is called
+*Save* and which *Export* depends on the file that is open, so the window names
+those four items again as files are opened: see ``window.write``.
 """
 
 from __future__ import annotations
@@ -41,12 +43,7 @@ def _file(menu, window: QMainWindow) -> None:
     _recent(menu.addMenu("Recent &files"), window)
 
     menu.addSeparator()
-    _add(menu, "&Save chump", QKeySequence.StandardKey.Save, lambda: window.save())
-    _add(menu, "Save chump &as...", None, lambda: window.save(ask=True))
-
-    menu.addSeparator()
-    _add(menu, "E&xport txt", QKeySequence("Ctrl+E"), lambda: window.export())
-    _add(menu, "Export txt as...", None, lambda: window.export(ask=True))
+    _write(menu, window)
 
     menu.addSeparator()
     # the rules a write is guarded by, asked for on their own and all at once
@@ -54,6 +51,36 @@ def _file(menu, window: QMainWindow) -> None:
 
     menu.addSeparator()
     _add(menu, "E&xit", QKeySequence.StandardKey.Quit, window.close)
+
+
+def _write(menu, window: QMainWindow) -> None:
+    """The items that write the text out: a pair per form, the plain one and *...as*.
+
+    Only the words on these change with the file on screen, so the actions are
+    made once here, each one doing the work of its own place in the block, and
+    the window is left to name them: see ``window.refresh_write_menu``.  The
+    shortcuts go with the places too, so Ctrl+S always reaches the first plain
+    item, which saves a file the program can write back and exports a chump from
+    one it can only read.
+    """
+    pairs = []
+    for index, shortcut in enumerate((QKeySequence.StandardKey.Save, QKeySequence("Ctrl+E"))):
+        pairs.append(
+            (
+                _add(
+                    menu, "", shortcut,
+                    lambda _checked=False, index=index: window.write(index),
+                ),
+                _add(
+                    menu, "", None,
+                    lambda _checked=False, index=index: window.write(index, ask=True),
+                ),
+            )
+        )
+        if index == 0:
+            menu.addSeparator()
+    window.write_actions = pairs
+    window.refresh_write_menu()
 
 
 def _recent(menu, window: QMainWindow) -> None:

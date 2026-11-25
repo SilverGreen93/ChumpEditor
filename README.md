@@ -9,7 +9,7 @@ Features:
 
 - Can convert Trainz `.chump` files - the binary form of an asset's `config.txt` - to and from their readable text form.
 - Can be used directly as an editor for `config.txt`/`config.chump` files
-- Can open `.cdp` files or `assets.tdx` files, save them as a plain `.chump` file, or export them to `.txt`.
+- Can open `.cdp` files or `assets.tdx` files and export them as `.chump` file or as `.txt`.
 - Contains tweaks to modernize obsolete config files (see below)
 - Offers syntax highlighting and line numbers
 - Syntax checking for files
@@ -101,12 +101,27 @@ it, and what is saved is plain text whatever a line looked like.
 - Work that is not on disk is asked about before anything replaces it - opening
   a file, dropping one in, or quitting - with **Save**, **Discard** and
   **Cancel**. Nothing is written unless you choose Save, and a Save that is
-  then talked out of stops the whole thing.
+  then talked out of stops the whole thing. A `.cdp` or an `assets.tdx` has no
+  form this program can write back, so that question offers only **Discard** and
+  **Cancel**, and the export items are where the work goes.
 - One file at a time. Several paths at once open the first and say which ones
   were left out.
 - **File**: Open file... (Ctrl+O, filtered to `.chump`, `.cdp`, `.tdx` and `.txt`), Recent
-  files (the ten opened last, and Clear list), Save chump (Ctrl+S), Save chump
-  as..., Export txt (Ctrl+E), Export txt as..., Syntax check (F5), Exit.
+  files (the ten opened last, and Clear list), the two write pairs, Syntax check
+  (F5), Exit. The words on the write pairs answer to the file that is open:
+  **Save** is the form that file is kept in and **Export** the other one, so a
+  `.chump` offers Save chump (Ctrl+S), Save chump as..., Export txt (Ctrl+E) and
+  Export txt as..., a `.txt` offers the same pair the other way round, and a
+  `.cdp` or `assets.tdx` has no save at all - just Export chump (Ctrl+S), Export
+  chump as..., Export txt (Ctrl+E) and Export txt as....
+- A write of either sort goes to the opened file's own folder, under the same
+  name, with the extension of the form being written; no dialog is in the way
+  unless the file has no name yet or you chose the *...as* item. A save writes
+  the file that is on screen and is never asked about; an export lands on a
+  different name every time, so if that name is already taken it asks whether to
+  overwrite it, however often the same item was pressed before. A save makes the
+  file it wrote the one you are editing; an export
+  leaves the opened file on screen and the exported file is never loaded.
 - **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
   Find next (F3).
 - **View**: Treeview (F2) - a tick box that puts a list of the file's containers

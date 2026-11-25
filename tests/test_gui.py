@@ -796,6 +796,70 @@ def test_the_file_menu_carries_the_shortcuts_people_already_know(window):
     assert not keys(window, "File", "Export txt as...")
 
 
+def write_items(window) -> list[str]:
+    """The File menu's write items, with the separator between the two pairs."""
+    return labels(menu_of(window, "File"))[3:8]
+
+
+def test_the_write_items_are_named_for_the_file_on_screen(window, tmp_path, tdx_of):
+    """*Save* is the form the file on screen is kept in and *Export* the other one.
+
+    The pair of words therefore turns around between a chump and a text file, and
+    the files this program reads but has no way of writing back have no save to
+    offer at all: both of their items are exports, and the menu says so rather
+    than offering a command that can only fail.
+    """
+    # a document with no file of its own is saved as a chump, the form the
+    # program was made to write
+    assert write_items(window) == [
+        "Save chump", "Save chump as...", "-", "Export txt", "Export txt as...",
+    ]
+
+    def named_for(path) -> list[str]:
+        window.open_path(path)
+        return write_items(window)
+
+    assert named_for(copy("config1.chump", tmp_path)) == [
+        "Save chump", "Save chump as...", "-", "Export txt", "Export txt as...",
+    ]
+    assert named_for(copy("config1.txt", tmp_path)) == [
+        "Save txt", "Save txt as...", "-", "Export chump", "Export chump as...",
+    ]
+
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    tdx = tmp_path / "assets.tdx"
+    tdx.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    cdp = tmp_path / "config1.cdp"
+    cdp.write_bytes((SAMPLES / "config1.chump").read_bytes())
+    for read_only in (tdx, cdp):
+        assert named_for(read_only) == [
+            "Export chump", "Export chump as...", "-", "Export txt", "Export txt as...",
+        ]
+
+
+def test_the_write_shortcuts_answer_to_the_menu_not_to_the_names(window, tmp_path, tdx_of):
+    """Ctrl+S and Ctrl+E reach the first and the second plain item.
+
+    The words over them change with the file; the keys do not, so what a person
+    learns once keeps working from one sort of file to the next - and over a
+    ``.tdx``, where there is no save, Ctrl+S writes the chump that the first
+    export does.
+    """
+    for path in (
+        copy("config1.chump", tmp_path),
+        copy("config1.txt", tmp_path),
+        tmp_path / "config1.cdp",
+    ):
+        if path.suffix == ".cdp":
+            path.write_bytes((SAMPLES / "config1.chump").read_bytes())
+        window.open_path(path)
+        first, first_as, _separator, second, second_as = write_items(window)
+        assert keys(window, "File", first) == "Ctrl+S"
+        assert keys(window, "File", second) == "Ctrl+E"
+        assert not keys(window, "File", first_as)
+        assert not keys(window, "File", second_as)
+
+
 def test_the_edit_menu_is_the_usual_set_of_edits(window):
     assert labels(menu_of(window, "Edit")) == [
         "Undo", "Redo", "-", "Cut", "Copy", "Paste", "Select All", "-",
@@ -1885,7 +1949,7 @@ def test_the_tree_names_the_file_the_title_names(window, picks, tmp_path):
 
     replace(window, 'kind "interior"\n')
     picks.choose.append(str(tmp_path / "second.chump"))
-    assert window.save(ask=True) == tmp_path / "second.chump"
+    assert window.write(0, ask=True) == tmp_path / "second.chump"
     assert window.treeview.file_name() == "second.chump"
 
 
@@ -3231,6 +3295,11 @@ def test_a_real_config_file_is_reordered_in_the_window(window, dialogs, tmp_path
 
 # ---------------------------------------------------------------------------
 # opening and writing from the menus
+#
+# The write items are counted the way the menu stands them, which is what
+# ``window.write`` answers to: 0 is the item Ctrl+S reaches and 1 the item
+# Ctrl+E reaches.  Which form each of them writes, and whether it is called a
+# save or an export, is the file's business - see the menu names above.
 # ---------------------------------------------------------------------------
 def test_opening_from_the_menu_asks_for_a_file_and_opens_it(window, picks, tmp_path):
     source = copy("config3.chump", tmp_path)
@@ -3319,9 +3388,9 @@ def test_answering_save_writes_the_work_and_carries_on(window, monkeypatch, pick
 def test_answering_save_but_cancelling_the_name_keeps_the_work_on_screen(
     window, monkeypatch, picks, tmp_path
 ):
-    """Answering save is not the same as saving: the name still has to be given.
+    """Answering save is not the same as saving: a new file still has to be named.
 
-    A text file being saved as a chump is asked where the new file goes; that
+    A document with no file of its own is asked where the new file goes; that
     question answered with nothing means the work is still unsaved, so the open
     that was asked for does not happen either.
     """
@@ -3329,17 +3398,15 @@ def test_answering_save_but_cancelling_the_name_keeps_the_work_on_screen(
         QMessageBox, "question",
         staticmethod(lambda *a, **k: QMessageBox.StandardButton.Save),
     )
-    keep = copy("config2.txt", tmp_path)
     away = copy("config1.chump", tmp_path)
-    window.open_path(keep)
     replace(window, 'kind "interior"\nkuid <kuid:9:9>\n')
 
     picks.choose.append("")  # the save dialog, cancelled
     picks.choose.append(str(away))
     click(window, "File", "Open file...")
 
-    assert keep.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
-    assert window.path == keep
+    assert away.read_bytes() == (SAMPLES / "config1.chump").read_bytes()
+    assert window.path is None
     assert window.editor.toPlainText().startswith('kind "interior"')
     assert window.editor.document().isModified()
     assert [which for which, *_ in picks.asked] == ["save"]
@@ -3360,55 +3427,65 @@ def test_saving_writes_the_file_being_edited_and_takes_the_star_off(window, tmp_
     assert dialogs == []  # a save nobody argued with needs no comment
 
 
-def test_saving_an_opened_tdx_writes_a_plain_chump(window, picks, tmp_path, tdx_of):
+def test_exporting_an_opened_tdx_writes_a_chump_beside_it(window, tmp_path, tdx_of, dialogs):
+    """The tdx has a folder already, and that is where its chump goes.
+
+    The tdx stays the file on screen: it cannot be written back, and a chump
+    written beside it is a copy rather than a new home for the text.
+    """
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+
+    assert window.write(0) == tmp_path / "assets.chump"
+    assert load_chump(tmp_path / "assets.chump") == parse_tdx(source.read_bytes())
+    assert window.path == source
+    assert window.windowTitle() == f"assets.tdx - {APP_TITLE}"
+    assert window.statusBar().currentMessage() == "Exported assets.chump"
+    assert write_items(window) == [
+        "Export chump", "Export chump as...", "-", "Export txt", "Export txt as...",
+    ]
+    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
+    assert dialogs == []  # no name to ask for when the folder and the name are known
+
+
+def test_exporting_an_opened_tdx_writes_its_text(window, tmp_path, tdx_of, dialogs):
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+
+    assert window.write(1) == tmp_path / "assets.txt"
+    assert read_as_written(tmp_path / "assets.txt") == as_file_text(text_of(window.editor))
+    assert window.path == source
+    assert window.statusBar().currentMessage() == "Exported assets.txt"
+    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
+    assert dialogs == []
+
+
+def test_a_tdx_export_dialog_offers_only_the_form_being_written(window, picks, tmp_path, tdx_of):
     settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
     source = tmp_path / "assets.tdx"
     source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
     window.open_path(source)
     picks.choose.append(str(tmp_path / "settings.chump"))
-
-    assert window.save() == tmp_path / "settings.chump"
-    assert load_chump(tmp_path / "settings.chump") == parse_tdx(source.read_bytes())
-    assert window.path == tmp_path / "settings.chump"
-    assert window.windowTitle() == f"settings.chump - {APP_TITLE}"
-    assert window.statusBar().currentMessage() == "Saved settings.chump"
-    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
-
-
-def test_exporting_an_opened_tdx_writes_its_text(window, picks, tmp_path, tdx_of):
-    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
-    source = tmp_path / "assets.tdx"
-    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
-    window.open_path(source)
-    picks.choose.append(str(tmp_path / "out.txt"))
-
-    assert window.export() == tmp_path / "out.txt"
-    assert read_as_written(tmp_path / "out.txt") == as_file_text(text_of(window.editor))
-    assert window.path == tmp_path / "out.txt"
-    assert window.statusBar().currentMessage() == "Exported out.txt"
-    assert source.read_bytes() == tdx_of(b"", pack_tag_tree(settings))
-
-
-def test_a_tdx_save_dialog_offers_only_the_chump_form(window, picks, tmp_path, tdx_of):
-    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
-    source = tmp_path / "assets.tdx"
-    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
-    window.open_path(source)
-    picks.choose.append(str(tmp_path / "settings.chump"))
-    window.save(ask=True)
+    window.write(0, ask=True)
     which, title, start, filters = picks.asked[-1]
-    assert (which, title) == ("save", "Save chump")
+    assert (which, title) == ("save", "Export chump")
     assert start == str(tmp_path / "assets.chump")
     assert filters == filter_string(CHUMP_GROUP)
-    window.export(ask=True)
+    window.write(1, ask=True)
+    assert picks.asked[-1][1] == "Export txt"
     assert picks.asked[-1][3] == filter_string(TEXT_GROUP)
+    assert window.path == source  # a dialog that was answered is still only an export
 
 
 def test_saving_an_untitled_editor_asks_where_the_file_goes(window, picks, tmp_path):
     replace(window, 'kind "interior"\n')
     picks.choose.append(str(tmp_path / "brand.new.chump"))
 
-    assert window.save() == tmp_path / "brand.new.chump"
+    assert window.write(0) == tmp_path / "brand.new.chump"
     assert load_chump(tmp_path / "brand.new.chump") == parse_text('kind "interior"\n')
     assert window.path == tmp_path / "brand.new.chump"
     assert window.windowTitle() == f"brand.new.chump - {APP_TITLE}"
@@ -3417,7 +3494,7 @@ def test_saving_an_untitled_editor_asks_where_the_file_goes(window, picks, tmp_p
 def test_a_name_without_an_extension_gets_the_one_being_written(window, picks, tmp_path):
     replace(window, "kuid <kuid:2:2>\n")
     picks.choose.append(str(tmp_path / "nothint"))
-    assert window.save() == tmp_path / "nothint.chump"
+    assert window.write(0) == tmp_path / "nothint.chump"
 
 
 def test_saving_as_asks_even_when_the_file_has_a_name(window, picks, tmp_path):
@@ -3425,63 +3502,284 @@ def test_saving_as_asks_even_when_the_file_has_a_name(window, picks, tmp_path):
     window.open_path(source)
     picks.choose.append(str(tmp_path / "second.chump"))
 
-    assert window.save(ask=True) == tmp_path / "second.chump"
+    assert window.write(0, ask=True) == tmp_path / "second.chump"
     assert source.read_bytes() == (SAMPLES / "config1.chump").read_bytes()
     assert window.path == tmp_path / "second.chump"
 
 
-def test_saving_a_text_file_as_a_chump_writes_a_chump(window, picks, tmp_path):
+def test_exporting_a_text_file_makes_a_chump_and_leaves_the_text_alone(window, tmp_path, dialogs):
+    """A text file is saved as text; the chump is the copy."""
     source = copy("config2.txt", tmp_path)
     window.open_path(source)
-    picks.choose.append(str(tmp_path / "packed.chump"))
 
-    assert window.save() == tmp_path / "packed.chump"
-    assert load_chump(tmp_path / "packed.chump") == load_chump(SAMPLES / "config2.chump")
+    assert window.write(1) == tmp_path / "config2.chump"
+    assert load_chump(tmp_path / "config2.chump") == load_chump(SAMPLES / "config2.chump")
+    assert window.path == source
+    assert window.statusBar().currentMessage() == "Exported config2.chump"
     assert source.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
+    assert dialogs == []
+
+
+def test_saving_a_text_file_writes_it_back_where_it_stands(window, tmp_path, dialogs):
+    """Ctrl+S over a text file writes a text file, in the same folder, same name."""
+    source = copy("config2.txt", tmp_path)
+    window.open_path(source)
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+
+    assert window.write(0) == source
+    assert window.statusBar().currentMessage() == "Saved config2.txt"
+    assert read_as_written(source) == 'kind "interior"\r\nkuid <kuid:2:2>\r\n'
+    assert not window.editor.document().isModified()
+    assert window.windowTitle() == f"config2.txt - {APP_TITLE}"
+    assert dialogs == []
 
 
 def test_the_save_dialog_starts_with_the_name_the_command_line_would_use(window, picks, tmp_path):
     window.open_path(copy("config2.txt", tmp_path))
-    window.save()
+    window.write(1, ask=True)
     which, title, start, filters = picks.asked[-1]
-    assert (which, title) == ("save", "Save chump")
+    assert (which, title) == ("save", "Export chump")
     assert start == str(tmp_path / "config2.chump")
+
+
+def test_the_write_dialog_is_titled_with_the_word_the_menu_uses(window, picks, tmp_path):
+    """The box that asks for a name says the same thing the menu item did."""
+    window.open_path(copy("config2.txt", tmp_path))
+    window.write(0, ask=True)
+    assert picks.asked[-1][1] == "Save txt"
+    window.write(1, ask=True)
+    assert picks.asked[-1][1] == "Export chump"
 
 
 def test_the_save_dialog_offers_only_the_form_being_written(window, picks, tmp_path):
     window.open_path(copy("config1.chump", tmp_path))
-    window.save(ask=True)
+    window.write(0, ask=True)
     assert picks.asked[-1][3] == filter_string(CHUMP_GROUP)
-    window.export(ask=True)
+    window.write(1, ask=True)
     assert picks.asked[-1][3] == filter_string(TEXT_GROUP)
 
 
-def test_exporting_a_chump_makes_a_text_file_and_becomes_the_file(window, picks, tmp_path):
+def test_exporting_a_chump_makes_a_text_file_and_leaves_the_chump_on_screen(
+    window, tmp_path, dialogs
+):
+    """The text that goes out is a copy: the chump stays the file being edited."""
     source = copy("config2.chump", tmp_path)
     window.open_path(source)
-    picks.choose.append(str(tmp_path / "given.txt"))
 
-    written = window.export()
-    assert written == tmp_path / "given.txt"
+    written = window.write(1)
+    assert written == tmp_path / "config2.txt"
     assert written.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
-    assert window.path == written
-    assert window.windowTitle() == f"given.txt - {APP_TITLE}"
-    assert window.statusBar().currentMessage() == "Exported given.txt"
+    assert window.path == source
+    assert window.windowTitle() == f"config2.chump - {APP_TITLE}"
+    assert window.statusBar().currentMessage() == "Exported config2.txt"
+    assert write_items(window) == [
+        "Save chump", "Save chump as...", "-", "Export txt", "Export txt as...",
+    ]
+    assert dialogs == []
 
 
-def test_exporting_a_text_file_keeps_it_where_it_stands(window, tmp_path):
-    source = copy("config2.txt", tmp_path)
+def test_the_items_do_what_their_names_say(window, tmp_path, dialogs):
+    """Pressed off the menu rather than called by index, so the words and the
+    work behind them are checked against each other."""
+    cases = (
+        ("config1.chump", "Export txt", "config1.txt"),
+        ("config2.txt", "Export chump", "config2.chump"),
+    )
+    for sample, label, written in cases:
+        folder = tmp_path / sample
+        folder.mkdir()
+        source = copy(sample, folder)
+        window.open_path(source)
+        assert source.suffix != Path(written).suffix
+
+        click(window, "File", label)
+        assert (folder / written).is_file()
+        assert window.path == source  # the copy did not take the opened file's place
+        assert window.statusBar().currentMessage() == f"Exported {written}"
+
+    # and the file that has no save at all, whose Ctrl+S item is an export too
+    cdp = tmp_path / "semnal.cdp"
+    cdp.write_bytes((SAMPLES / "semnal.chump").read_bytes())
+    window.open_path(cdp)
+    click(window, "File", "Export chump")
+    click(window, "File", "Export txt")
+    assert (tmp_path / "semnal.chump").is_file()
+    assert (tmp_path / "semnal.txt").is_file()
+    assert window.path == cdp
+    assert window.windowTitle() == f"semnal.cdp - {APP_TITLE}"
+    assert dialogs == []
+
+
+def test_an_export_item_pressed_twice_asks_about_the_same_file_twice(
+    window, monkeypatch, tmp_path
+):
+    """Straight off the menu, twice in a row, because the press that was answered
+    once used to be taken as settled for the press after it."""
+    source = copy("config2.chump", tmp_path)
+    already = copy("config2.txt", tmp_path)
     window.open_path(source)
-    window.editor.insertPlainText("x")
-    assert window.export() == source
+    asked = answered(monkeypatch, QMessageBox.StandardButton.Yes)
+    ask = (DISPLAY_NAME, "config2.txt already exists. Overwrite it?")
+
+    click(window, "File", "Export txt")
+    assert asked == [ask]
+    click(window, "File", "Export txt")
+    assert asked == [ask, ask]
+    assert already.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
+    assert window.path == source
+
+
+def test_an_export_leaves_the_work_still_marked_as_unsaved(window, tmp_path, dialogs):
+    """Only a save counts as keeping the work.
+
+    An export puts the text out in the other form beside the file it came out of;
+    that file still holds the older text, so the star stays where it was and
+    closing the window still asks about the work.
+    """
+    source = copy("config1.chump", tmp_path)
+    window.open_path(source)
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+
+    assert window.write(1) == tmp_path / "config1.txt"
+    assert window.path == source
+    assert window.editor.document().isModified()
+    assert window.windowTitle() == f"config1.chump * - {APP_TITLE}"
 
 
 def test_exporting_keeps_the_spacing_the_editor_has(window, picks, tmp_path):
     replace(window, 'kuid    <kuid:2:2>\nname "two  spaces"\n')
     picks.choose.append(str(tmp_path / "kept.txt"))
-    assert read_as_written(window.export()) == (
+    assert read_as_written(window.write(1)) == (
         'kuid    <kuid:2:2>\r\nname "two  spaces"\r\n'
     )
+
+
+def answered(monkeypatch, button: QMessageBox.StandardButton):
+    """Every question answered with ``button``, its title and text written down."""
+    asked: list[tuple[str, str]] = []
+
+    def respond(parent, title, text, *a, **k):
+        asked.append((title, text))
+        return button
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(respond))
+    return asked
+
+
+def test_neither_write_asks_for_a_name_when_a_file_is_already_open(window, picks, tmp_path):
+    """A file knows where it lives; going from one form of it to the other is not
+    a decision about where it goes, so nothing is asked."""
+    source = copy("config1.chump", tmp_path)
+    window.open_path(source)
+
+    assert window.write(1) == tmp_path / "config1.txt"
+    assert window.write(0) == tmp_path / "config1.chump"
+    assert picks.asked == []  # not one save dialog between the two writes
+
+
+def test_exporting_onto_an_existing_file_that_is_not_the_one_is_asked_about(
+    window, picks, tmp_path, dialogs
+):
+    """The chump is on screen; the txt that is already there belongs to somebody else."""
+    source = copy("config2.chump", tmp_path)
+    already = copy("config2.txt", tmp_path)
+    keep = already.read_bytes()
+    window.open_path(source)
+
+    assert window.write(1) is None
+    assert dialogs[-1][0] == "question"
+    assert dialogs[-1][1] == DISPLAY_NAME
+    assert dialogs[-1][2] == "config2.txt already exists. Overwrite it?"
+    assert picks.asked == []  # refused by a box, not by a cancelled dialog
+    assert already.read_bytes() == keep
+    assert source.read_bytes() == (SAMPLES / "config2.chump").read_bytes()
+    assert window.path == source
+
+
+def test_answering_the_overwrite_question_yes_writes_the_file_that_was_there(
+    window, monkeypatch, tmp_path
+):
+    source = copy("config2.chump", tmp_path)
+    already = copy("config2.txt", tmp_path)
+    window.open_path(source)
+    asked = answered(monkeypatch, QMessageBox.StandardButton.Yes)
+
+    assert window.write(1) == already
+    assert asked == [(DISPLAY_NAME, "config2.txt already exists. Overwrite it?")]
+    assert already.read_bytes() == (SAMPLES / "config2.txt").read_bytes()
+    assert window.path == source
+    assert window.windowTitle() == f"config2.chump - {APP_TITLE}"
+    assert window.statusBar().currentMessage() == "Exported config2.txt"
+
+
+def test_writing_the_file_that_was_opened_asks_nothing_at_all(window, tmp_path, dialogs):
+    """The save is the file on screen and the export has no name in the way, so
+    the round trip between the two forms is silent."""
+    source = copy("config2.chump", tmp_path)
+    window.open_path(source)
+
+    assert window.write(1) == tmp_path / "config2.txt"
+    assert window.write(0) == source
+    assert [one for one in dialogs if one[0] == "question"] == []
+    assert window.path == source
+    assert load_chump(source) == load_chump(SAMPLES / "config2.chump")
+
+
+def test_a_name_already_taken_is_asked_about_whatever_was_written_here_before(
+    window, picks, monkeypatch, tmp_path
+):
+    """Writing one file here first says nothing about the next name it lands on."""
+    copy("config1.txt", tmp_path)
+    picks.choose.append(str(tmp_path / "config1.chump"))
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+    assert window.write(0, ask=True) == tmp_path / "config1.chump"
+
+    asked = answered(monkeypatch, QMessageBox.StandardButton.Cancel)
+    assert window.write(1) is None
+    assert asked == [(DISPLAY_NAME, "config1.txt already exists. Overwrite it?")]
+    assert window.path == tmp_path / "config1.chump"
+
+
+def test_the_chump_beside_a_tdx_is_asked_about_before_it_is_written(
+    window, tmp_path, tdx_of, dialogs
+):
+    """The chump beside an assets.tdx is a file Trainz reads; overwriting it is asked."""
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    beside = tmp_path / "assets.chump"
+    beside.write_bytes(b"not this one\n")
+    window.open_path(source)
+
+    assert window.write(0) is None
+    assert dialogs[-1][2] == "assets.chump already exists. Overwrite it?"
+    assert beside.read_bytes() == b"not this one\n"
+    assert window.path == source
+
+
+def test_a_save_onto_the_file_on_screen_is_asked_about_never(window, picks, tmp_path):
+    """A save as... that answers with the file already on screen writes it quietly."""
+    picks.choose.append(str(tmp_path / "second.chump"))
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+    assert window.write(0, ask=True) == tmp_path / "second.chump"
+
+    picks.choose.append(str(tmp_path / "second.chump"))
+    replace(window, 'kind "interior"\nkuid <kuid:3:3>\n')
+    assert window.write(0, ask=True) == tmp_path / "second.chump"
+    assert load_chump(tmp_path / "second.chump") == parse_text('kind "interior"\nkuid <kuid:3:3>\n')
+
+
+def test_the_menu_is_named_again_when_a_save_names_another_sort_of_file(window, picks, tmp_path):
+    """A save asked for a name gets the name it was answered with, and the menu
+    follows the file that is now on screen."""
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+    picks.choose.append(str(tmp_path / "carried.txt"))
+
+    assert window.write(0, ask=True) == tmp_path / "carried.txt"
+    assert window.path == tmp_path / "carried.txt"
+    assert write_items(window) == [
+        "Save txt", "Save txt as...", "-", "Export chump", "Export chump as...",
+    ]
 
 
 def test_a_document_that_does_not_pack_is_not_written(window, tmp_path, dialogs):
@@ -3490,7 +3788,7 @@ def test_a_document_that_does_not_pack_is_not_written(window, tmp_path, dialogs)
     window.open_path(source)
     replace(window, "kuid-table\n{\n")
 
-    assert window.save() is None
+    assert window.write(0) is None
     assert dialogs[-1][0] == "error"
     assert "never closed" in dialogs[-1][2]
     assert source.read_bytes() == before
@@ -3500,7 +3798,7 @@ def test_a_document_that_does_not_pack_is_not_written(window, tmp_path, dialogs)
 def test_a_loose_quote_mark_is_said_before_any_file_is_asked_for(window, picks, dialogs):
     replace(window, 'username bob"\n')
 
-    assert window.save() is None
+    assert window.write(0) is None
     assert picks.asked == []  # the check comes first, so no save dialog was opened
     assert dialogs[-1][0] == "error"
     assert "line 1: value for tag 'username' has a quote mark" in dialogs[-1][2]
@@ -3510,7 +3808,7 @@ def test_exporting_a_document_with_half_a_kuid_writes_nothing(window, picks, tmp
     replace(window, "k <kuid:1:2\n")
     picks.choose.append(str(tmp_path / "half.txt"))
 
-    assert window.export() is None
+    assert window.write(1) is None
     assert picks.asked == []
     assert not (tmp_path / "half.txt").exists()
     assert dialogs[-1][2] == "line 1: value for tag 'k': '<' with no '>' after it"
@@ -3522,7 +3820,7 @@ def test_an_unclosed_quote_stops_an_export_but_not_the_work(window, tmp_path, di
     window.open_path(source)
     replace(window, 'name "abc\n')
 
-    assert window.export() is None
+    assert window.write(1) is None
     assert source.read_bytes() == before
     assert dialogs[-1][0] == "error"
     assert window.editor.document().isModified()
@@ -3535,7 +3833,7 @@ def test_a_quote_mark_with_no_partner_in_a_real_file_is_said(window, tmp_path, d
     window.open_path(source)
     replace(window, text_of(window.editor).replace('"interior"', '"interior'))
 
-    assert window.save() is None
+    assert window.write(0) is None
     assert dialogs[-1][0] == "error"
     assert "line 2: quoted value for tag 'kind' has a quote mark with no partner" in dialogs[-1][2]
     assert source.read_bytes() == before
@@ -3550,7 +3848,7 @@ def test_a_name_written_twice_in_one_container_is_said_and_nothing_is_written(
     window.open_path(source)
     replace(window, 'username "abc"\nusername "bcdf"\n')
 
-    assert window.save() is None
+    assert window.write(0) is None
     assert picks.asked == []  # the check comes first, so no save dialog was opened
     assert source.read_bytes() == before
     assert "line 2: tag 'username' is written twice at the same level" in dialogs[-1][2]
@@ -3562,10 +3860,86 @@ def test_a_write_that_was_turned_down_leaves_the_star_up(window, picks, tmp_path
     window.editor.insertPlainText("x")
     picks.choose.append("")  # cancelled
 
-    assert window.save(ask=True) is None
+    assert window.write(0, ask=True) is None
     assert window.editor.document().isModified()
     assert window.windowTitle() == f"config1.chump * - {APP_TITLE}"
     assert list(tmp_path.glob("*.chump")) == [source]
+
+
+def test_an_export_onto_its_own_last_output_is_asked_about_again(
+    window, monkeypatch, tmp_path
+):
+    """An export that lands on a name already taken is asked about every time.
+
+    The copy beside the opened file is a second file rather than the text's own,
+    so the export before it settles nothing: the file may have been read, edited
+    or locked since, and the answer has to be asked again whoever wrote it.
+    """
+    source = copy("config2.chump", tmp_path)
+    window.open_path(source)
+
+    # nothing is in the way the first time, so nothing is asked
+    assert window.write(1) == tmp_path / "config2.txt"
+
+    asked = answered(monkeypatch, QMessageBox.StandardButton.Yes)
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+    assert window.write(1) == tmp_path / "config2.txt"
+    assert asked == [(DISPLAY_NAME, "config2.txt already exists. Overwrite it?")]
+    assert read_as_written(tmp_path / "config2.txt") == 'kind "interior"\r\nkuid <kuid:2:2>\r\n'
+
+    # the save is the text's own file, and stays quiet however often it is pressed
+    assert window.write(0) == source
+    assert window.write(0) == source
+    assert asked == [(DISPLAY_NAME, "config2.txt already exists. Overwrite it?")]
+
+
+def test_an_export_asked_again_and_turned_down_writes_nothing(window, monkeypatch, tmp_path):
+    source = copy("config2.chump", tmp_path)
+    window.open_path(source)
+    assert window.write(1) == tmp_path / "config2.txt"
+    keep = (tmp_path / "config2.txt").read_bytes()
+
+    asked = answered(monkeypatch, QMessageBox.StandardButton.Cancel)
+    replace(window, 'kind "interior"\nkuid <kuid:2:2>\n')
+    assert window.write(1) is None
+    assert asked == [(DISPLAY_NAME, "config2.txt already exists. Overwrite it?")]
+    assert (tmp_path / "config2.txt").read_bytes() == keep
+    assert window.path == source
+
+
+def test_a_file_that_cannot_be_written_is_asked_only_about_losing_the_work(
+    window, monkeypatch, picks, tmp_path, tdx_of
+):
+    """No Save button where there is nowhere to save to.
+
+    One of the files that can only be read leaves the work with no file of its
+    own to go back into, so the box names the work and offers the two answers it
+    can actually honour; Cancel is the way back to the export items in the menu.
+    """
+    asked: list[tuple[str, str, int, int]] = []
+
+    def answer(parent, title, text, buttons=0, default=0, *a, **k):
+        asked.append((title, text, int(buttons), int(default)))
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(answer))
+    settings = parse_chump((SAMPLES / "config2.chump").read_bytes()).tags
+    source = tmp_path / "assets.tdx"
+    source.write_bytes(tdx_of(b"", pack_tag_tree(settings)))
+    window.open_path(source)
+    replace(window, 'kind "interior"\nkuid <kuid:9:9>\n')
+
+    away = copy("config1.chump", tmp_path)
+    picks.choose.append(str(away))
+    click(window, "File", "Open file...")
+
+    box = QMessageBox.StandardButton
+    title, text, buttons, default = asked[0]
+    assert (title, text) == (DISPLAY_NAME, "Discard changes to assets.tdx?")
+    assert buttons == int(box.Discard | box.Cancel)
+    assert default == int(box.Cancel)
+    assert window.path == away  # the work was let go and the file opened
+    assert not (tmp_path / "assets.chump").exists()  # nothing was written on the way
 
 
 # ---------------------------------------------------------------------------

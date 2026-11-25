@@ -7,9 +7,16 @@ editor, and the window's title says which file that is and whether it has been
 changed since it was written.  An assets.tdx opens with both of its settings
 blocks decoded into the text area at once.
 
-Writing the file back is the window's decision, not the editor's: *Save chump*
-packs the text into a binary file and *Export txt* writes the text form, and
-whichever was last written becomes the file the window is talking about.
+Writing the file back is the window's decision, not the editor's, and the words
+on the menu items answer to the file on screen: *Save* names the form that file
+is kept in and *Export* the other one, so a chump is saved as a chump and
+exported as text while a text file is the other way round, and the files this
+program reads but has no way of writing back have no save to offer at all.  Only
+a save makes a file the one the window is talking about; an export writes a copy
+and leaves the file that was opened on screen.  A file that already has a name
+has somewhere to go, so it is written beside itself under the same name with the
+extension of the form being written, without a dialog in the way; a dialog is
+asked for only where there is no file to go on, or where *...as* asks for one.
 
 Searching the text belongs to a panel of its own, stood at the bottom of the
 window and brought up from the Edit menu; the window only connects its news to
@@ -22,6 +29,7 @@ where the panel stands and what a chosen row does to the caret.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from os.path import abspath, normcase
 from pathlib import Path
 from typing import Callable
 
@@ -33,7 +41,9 @@ from .. import tweaks
 from ..chump import ChumpError, Problem
 from ..document import (
     CHUMP_GROUP,
+    TDX_SUFFIXES,
     TEXT_GROUP,
+    TEXT_SUFFIXES,
     as_file_text,
     check_text,
     filter_string,
@@ -92,10 +102,8 @@ MAXIMIZED_SETTING = "maximized"
 class WriteForm:
     """One of the two ways the text on screen can be written out."""
 
-    #: what the menu item is called, and what the save dialog is titled
-    verb: str
-    #: what the status bar says once it has been done
-    done: str
+    #: what the menu and the save dialog call this form after "Save" or "Export"
+    name: str
     #: the extension a file of this form has
     suffix: str
     #: the extension the save dialog offers, and nothing else
@@ -104,8 +112,71 @@ class WriteForm:
     write: Callable[[str, Path], Path]
 
 
-CHUMP_WRITE = WriteForm("Save chump", "Saved", ".chump", CHUMP_GROUP, save_chump)
-TEXT_WRITE = WriteForm("Export txt", "Exported", ".txt", TEXT_GROUP, save_text)
+CHUMP_WRITE = WriteForm("chump", ".chump", CHUMP_GROUP, save_chump)
+TEXT_WRITE = WriteForm("txt", ".txt", TEXT_GROUP, save_text)
+
+#: writing the form the open file is kept in is a save; writing the other form is
+#: an export.  The words go in front of the form's name in the menu, name the save
+#: dialog, and say what the status bar will report
+SAVE_WORD, EXPORT_WORD = "Save", "Export"
+
+#: what the status bar says once each of the two has been done
+SAVE_DONE, EXPORT_DONE = "Saved", "Exported"
+
+#: a ``.cdp`` holds a chump but is one of the containers this program reads and
+#: has no way of writing back, so it is exported and never saved
+CDP_SUFFIX = ".cdp"
+
+
+@dataclass(frozen=True)
+class WritePair:
+    """The two File menu items that write one form: the plain one and *...as*."""
+
+    #: the form both items write
+    form: WriteForm
+    #: *Save* when this is the form the open file is kept in, *Export* otherwise
+    word: str
+
+
+def _write_plan(path: Path | None) -> list[WritePair]:
+    """What the File menu offers, for the file on screen.
+
+    One pair each, in the order the menu stands them: a chump is saved as a chump
+    and exported as text, a text file the other way round.  A cdp or an
+    ``assets.tdx`` is one of the containers the program reads and has no way of
+    writing back, so it has nothing to save and two exports in its place.  A
+    document with no file yet is saved as a chump, which is what the program was
+    made to write.
+    """
+    suffix = path.suffix.lower() if path else ""
+    if suffix in TDX_SUFFIXES or suffix == CDP_SUFFIX:
+        return [
+            WritePair(CHUMP_WRITE, EXPORT_WORD),
+            WritePair(TEXT_WRITE, EXPORT_WORD),
+        ]
+    if suffix in TEXT_SUFFIXES:
+        return [
+            WritePair(TEXT_WRITE, SAVE_WORD),
+            WritePair(CHUMP_WRITE, EXPORT_WORD),
+        ]
+    return [
+        WritePair(CHUMP_WRITE, SAVE_WORD),
+        WritePair(TEXT_WRITE, EXPORT_WORD),
+    ]
+
+
+def _pair_labels(pair: WritePair, *, second: bool = False) -> tuple[str, str]:
+    """What a pair's two items are called, mnemonic markers and all.
+
+    Both items write the same form; only the second one asks where the file goes.
+    The first pair underlines the first letter of its word, the second the "x" of
+    an export, because a file that cannot be saved stands two exports in the menu
+    and both of them have to be reachable from the keyboard.
+    """
+    word, name = pair.word, pair.form.name
+    if second:
+        return f"{word[0]}&{word[1:]} {name}", f"{word} {name} as..."
+    return f"&{word} {name}", f"{word} {name} &as..."
 
 
 def _counted(problems: list[Problem]) -> str:
@@ -115,12 +186,30 @@ def _counted(problems: list[Problem]) -> str:
     return f"{len(problems)} problem{'' if len(problems) == 1 else 's'} found"
 
 
+def _same_file(one: Path | None, two: Path | None) -> bool:
+    """Whether two names are the same file, however each of them is spelled.
+
+    The names a save is worked out from are built from the one that was opened,
+    so they usually match character for character already; this is for the ones
+    that do not - a path named on the command line in another case, or relative
+    rather than full - where comparing the strings would send a file to the
+    confirmation box for no reason.  A name that is not there at all, which is
+    what a document that was never opened has, is the same as nothing.
+    """
+    if one is None or two is None:
+        return False
+    return normcase(abspath(one)) == normcase(abspath(two))
+
+
 class ChumpWindow(QMainWindow):
     """The editor, the title, and the messages the window can give."""
 
     def __init__(self, paths: list[str] | None = None) -> None:
         super().__init__()
         self.path: Path | None = None
+        #: the file the text on screen was read out of, which a save may always
+        #: overwrite without a word; ``path`` moves with each write, this does not
+        self._opened: Path | None = None
         #: the folder the last file came from or went to, to start a dialog in
         self._folder: Path | None = None
         self._message = ""
@@ -128,6 +217,8 @@ class ChumpWindow(QMainWindow):
         self.recent = RecentFiles()
         #: the menu those names are written into, filled in by ``build_menus``
         self.recent_menu = None
+        #: the File menu's write items, in pairs, named again as files open
+        self.write_actions: list[tuple] = []
         #: what the program remembers about itself between runs
         self.settings = Settings()
 
@@ -205,8 +296,10 @@ class ChumpWindow(QMainWindow):
         self.editor.setPlainText(text)
         self.editor.document().setModified(False)
         self.path = Path(path)
+        self._opened = self.path
         self._folder = self.path.parent
         self._refresh_title()
+        self.refresh_write_menu()
         self.say(f"Opened {self.path.name}")
         self.remember(self.path)
         return self.path
@@ -328,13 +421,29 @@ class ChumpWindow(QMainWindow):
         if self.recent.broken:
             self.say(self.recent.broken)
 
-    def save(self, *, ask: bool = False) -> Path | None:
-        """File > Save chump: the text back into a binary config file."""
-        return self._write(CHUMP_WRITE, ask)
+    def write(self, index: int, *, ask: bool = False) -> Path | None:
+        """One of the File menu's write items, counted from the top of the block.
 
-    def export(self, *, ask: bool = False) -> Path | None:
-        """File > Export txt: the text as a .txt file, spacing and all."""
-        return self._write(TEXT_WRITE, ask)
+        Which form an item writes, and whether it is called a save or an export,
+        is settled by the file on screen: ``_write_plan`` says what stands at
+        each place and the menu is named from it, so pressing Ctrl+S over a
+        ``.tdx`` exports a chump where over a ``.chump`` it saves one.
+        """
+        return self._write(_write_plan(self.path)[index], ask)
+
+    def refresh_write_menu(self) -> None:
+        """Name the File menu's write items for the file on screen.
+
+        The menus are built once and only these items change, so they are named
+        again as each file is opened rather than rebuilt: what is written is the
+        difference between putting the text back into the file it came out of and
+        leaving that file alone and writing a copy beside it.
+        """
+        pairs = self.write_actions
+        for index, pair in enumerate(_write_plan(self.path)):
+            first, second = _pair_labels(pair, second=bool(index))
+            pairs[index][0].setText(first)
+            pairs[index][1].setText(second)
 
     def syntax_check(self) -> None:
         """File > Syntax check: every rule a write is guarded by, said at once.
@@ -594,12 +703,14 @@ class ChumpWindow(QMainWindow):
         box = QMessageBox.warning if result.warning else QMessageBox.information
         box(self, title, result.summary())
 
-    def _write(self, form: WriteForm, ask: bool) -> Path | None:
-        """Write out in one form, and make that the file being edited.
+    def _write(self, pair: WritePair, ask: bool) -> Path | None:
+        """Write out in one form, as a save or as an export.
 
-        The file changes identity because that is what the window has been
-        asked for: exporting a chump to text leaves the text on screen, and so
-        the text file is the one it now belongs to.
+        A save carries the window along with it: the file it just wrote is the
+        file being edited, and the work on screen counts as kept.  An export
+        leaves the window where it was.  The text that was written out is a copy
+        in another form, and the file the text came out of stays the one on
+        screen, still standing for whatever of the work has not gone back to it.
 
         The text is looked at before any file is chosen.  A file that cannot be
         written should not cost anybody a save dialog, and the same check runs
@@ -613,37 +724,94 @@ class ChumpWindow(QMainWindow):
             self.error(str(exc))
             return None
 
-        target = self._target(form, ask)
+        target = self._target(pair, ask)
         if target is None:
             return None
         try:
-            form.write(text, target)
+            pair.form.write(text, target)
         except (OSError, ChumpError) as exc:
             self.error(f"{target}\n{exc}")
             return None
-        self.path = target
+        saving = pair.word == SAVE_WORD
         self._folder = target.parent
-        self.editor.document().setModified(False)
-        self._refresh_title()
-        self.say(f"{form.done} {target.name}")
+        if saving:
+            self.path = target
+            self.editor.document().setModified(False)
+            self._refresh_title()
+            # a name asked for may stand for a file of another sort, and what the
+            # menu can offer follows from the file that is now open
+            self.refresh_write_menu()
+        self.say(f"{SAVE_DONE if saving else EXPORT_DONE} {target.name}")
         return target
 
-    def _target(self, form: WriteForm, ask: bool) -> Path | None:
-        """The file to write: the one being edited, or one just now chosen."""
-        if not ask and self.path and self.path.suffix.lower() == form.suffix:
-            return self.path
+    def _target(self, pair: WritePair, ask: bool) -> Path | None:
+        """The file to write: the one being edited, or one just now chosen.
 
-        start = suggested_path(self.path, form.suffix)
+        A file that already has a name has somewhere to go, so the plain items
+        write beside it: the same folder, the same name, the extension of the
+        form being written.  Nothing is asked, because nothing is being decided -
+        where the file lives is the one thing already known about it.  A document
+        with no file of its own has nothing to go on, so it is asked where it
+        should go, and *...as* is asked every time because asking is the whole of
+        what that item is for.
+        """
+        if ask or self.path is None:
+            return self._chosen(pair)
+        return self._beside(pair)
+
+    def _beside(self, pair: WritePair) -> Path | None:
+        """The file the text belongs in: where it stands, the other extension.
+
+        A name that is already taken is asked about first unless it is the file
+        this window read the text out of and is writing back.  A quiet write
+        reaching a file somebody else put there is the one way this could cost
+        anybody work they did not just now do.
+        """
+        target = suggested_path(self.path, pair.form.suffix)
+        return target if self._ok_to_overwrite(target) else None
+
+    def _chosen(self, pair: WritePair) -> Path | None:
+        """Ask for a name, and give it the extension being written if it has none.
+
+        The dialog is asked to confirm overwriting a name that is already there,
+        which is why nothing here asks again: what the dialog settled is settled.
+        """
+        start = suggested_path(self.path, pair.form.suffix)
         name, _chosen = QFileDialog.getSaveFileName(
             self,
-            form.verb,
+            f"{pair.word} {pair.form.name}",
             str(start) if start else self._folder_name(),
-            filter_string(form.group),
+            filter_string(pair.form.group),
         )
         if not name:
             return None
         target = Path(name)
-        return target if target.suffix else target.with_suffix(form.suffix)
+        return target if target.suffix else target.with_suffix(pair.form.suffix)
+
+    def _ok_to_overwrite(self, target: Path) -> bool:
+        """Whether ``target`` may be written, asking first when a file is in the way.
+
+        Two names are exempt and both belong to a save: the file that was opened
+        and the file being edited.  Writing one of them again is the same command
+        over the text's own file, which is all a save is.  An export reaches
+        neither of them, because it writes the other form under a different
+        extension and leaves the opened file alone, so an export that lands on a
+        name that is already taken is asked about every time it is pressed,
+        whoever put that file there.  The file is named in the question, with the
+        refusal the safe answer.
+        """
+        if not target.is_file():
+            return True
+        if _same_file(target, self.path) or _same_file(target, self._opened):
+            return True
+        answer = QMessageBox.question(
+            self,
+            DISPLAY_NAME,
+            f"{target.name} already exists. Overwrite it?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def _folder_name(self) -> str:
         """Where a dialog starts: the folder of the last file, or nowhere."""
@@ -652,14 +820,27 @@ class ChumpWindow(QMainWindow):
     def _ok_to_replace(self) -> bool:
         """Whether the editor may be cleared, asking first if anything is at risk.
 
-        The work is asked about the way every other program asks about it: Save
-        writes it out and carries on, Discard throws it away, Cancel stops where
-        it was.  A box that only offers to discard leaves nobody any way to keep
-        the very work it has just warned them about.
+        Where the file on screen has a form this program can write the work is
+        asked about the way every other program asks about it: Save writes it out
+        and carries on, Discard throws it away, Cancel stops where it was.  Where
+        it has none, which is what one of the files that can only be read leaves
+        behind, the box names the work and offers the two answers it can actually
+        honour; a Save button that has nowhere to write is a trap, and Cancel is
+        the way back to the export items that do have somewhere.
         """
         if not self.editor.document().isModified():
             return True
         name = self._the_file_name()
+        index = self._save_index()
+        if index is None:
+            answer = QMessageBox.question(
+                self,
+                DISPLAY_NAME,
+                f"Discard changes to {name}?",
+                QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            return answer == QMessageBox.StandardButton.Discard
         answer = QMessageBox.question(
             self,
             DISPLAY_NAME,
@@ -672,8 +853,19 @@ class ChumpWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Save:
             # a save that was argued with, cancelled or refused keeps the work
             # on screen, and the thing that was asked for does not happen
-            return self.save() is not None
+            return self.write(index) is not None
         return answer == QMessageBox.StandardButton.Discard
+
+    def _save_index(self) -> int | None:
+        """Which write item saves the file on screen, or none if nothing can.
+
+        A chump and a text file each have one form they are kept in; the files
+        that can only be read have none, and their whole menu is exports.
+        """
+        for index, pair in enumerate(_write_plan(self.path)):
+            if pair.word == SAVE_WORD:
+                return index
+        return None
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
         """Closing over work that was never written out is asked about first."""
