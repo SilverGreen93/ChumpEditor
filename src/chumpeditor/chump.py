@@ -810,19 +810,57 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
     return tags, index
 
 
+#: a value written whole on one line: a number, or a comma separated run of them
+_A_NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+
+
+def _a_value_is_written_whole(stripped: str) -> bool:
+    """Whether this text is a value all on its own, from end to end.
+
+    Only a quoted string, a ``<kuid...>`` or a number can be a value, so a whole
+    one of those says where the name before it ends - which is what lets a name
+    hold spaces: ``Scenery Objects    "<kuid2:401543:3220:1>,"``.  Text that
+    merely starts as if it were one is not, so neither the ``prose <not a kuid>
+    here`` of a string value nor the ``"{`` of a value running over the line
+    below breaks a name.
+    """
+    if stripped.startswith('"'):
+        return len(stripped) > 1 and stripped.endswith('"')
+    if stripped.startswith("<"):
+        return stripped.endswith(">")
+    parts = stripped.split(",")
+    return all(_A_NUMBER.fullmatch(part.strip()) for part in parts)
+
+
+def _the_name_end(stripped: str) -> int | None:
+    """Where the name on this line ends, or nothing when nothing breaks it.
+
+    The first run of spaces after which a whole value stands is the break
+    between a name and its value; the spaces in ``Scenery Objects`` are followed
+    by ``Objects``, which starts no value, so they belong to the name.  A line
+    with no such break - ``kind scenery`` - keeps the older reading, its first
+    word the name and everything after it the value.
+    """
+    for gap in re.finditer(r"\s+", stripped):
+        if _a_value_is_written_whole(stripped[gap.end():]):
+            return gap.start()
+    return None
+
+
 def _split_name(stripped: str, brace_below: bool = False) -> tuple[str, str]:
     """A tag name and the text after the spaces that separate it from a value.
 
-    A tag's name is one word, because only a space separates it from its value.
-    A container's name is the whole line up to the brace it opens, because such
-    a name may hold spaces - the ``2018-12-15 162811.jpg`` of a screenshots
-    container is one name, and the brace is the only thing that says where it
-    ends.  A brace is read as that container's own when it ends the line, spaces
-    before it or not, or when it is kept for the line below, which is what
-    ``brace_below`` says.  A brace inside a quoted value, the ``{`` of ``k "{``
-    whose value carries on below, belongs to the value; and a line already
-    ending with a quoted value or a kuid holds a value, so a brace kept for the
-    line under it names nothing.
+    A name ends at the first run of spaces a value can start on, and so may hold
+    spaces of its own: ``Scenery Objects`` and the ``2018-12-15 162811.jpg`` of
+    a screenshots container are each one name.  A brace says a name ends too,
+    because a container's name is the whole line up to the brace it opens - read
+    as that container's own when it ends the line, spaces before it or not, or
+    when it is kept for the line below, which is what ``brace_below`` says.  A
+    brace inside a quoted value, the ``{`` of ``k "{`` whose value carries on
+    below, belongs to the value; and a line already ending with a quoted value
+    or a kuid holds a value, so a brace kept for the line under it names nothing.
+    With no value and no brace to break the line, the name is its first word and
+    everything after it is a value, the older reading that still fits the files.
     """
     parts = stripped.split(None, 1)
     if not parts:
@@ -831,13 +869,16 @@ def _split_name(stripped: str, brace_below: bool = False) -> tuple[str, str]:
     rest = parts[1].strip() if len(parts) > 1 else ""
     if stripped.endswith("{") and stripped != "{" and stripped.count('"') % 2 == 0:
         # the line ends with a brace of its own, and a brace only ever stands
-        # alone at the end of a name's line: what is written before it, spaces
-        # and all, is the container's name.  An odd number of quotes says the
-        # brace belongs to a value instead, the ``{`` of ``k "{`` which carries
-        # on below
+        # at the end of a name's line: what is written before it, spaces and
+        # all, is the container's name.  An odd number of quotes says the brace
+        # belongs to a value instead, the ``{`` of ``k "{`` which carries on below
         name, rest = stripped[:-1].rstrip(), "{"
     elif brace_below and not rest.startswith(('"', "<")):
         name, rest = stripped, ""
+    else:
+        end = _the_name_end(stripped)
+        if end is not None:
+            name, rest = stripped[:end], stripped[end:].strip()
     if name.endswith(":"):  # tolerate the config.txt spelling "name: value"
         name = name[:-1]
     return name, rest

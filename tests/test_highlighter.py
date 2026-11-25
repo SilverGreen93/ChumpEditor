@@ -170,6 +170,19 @@ def test_a_name_with_a_dot_in_it_is_coloured_all_of_a_piece(editor):
     assert shown(editor) == [[("junction.forward", "tags"), (" 1", "plain")]]
 
 
+def test_a_tag_name_holding_spaces_is_coloured_all_of_a_piece(editor):
+    """A name ends where its value begins, so the spaces inside the name of a
+    picklist table belong to the name and only the value is coloured as one."""
+    editor.setPlainText('Scenery Objects         "<kuid2:401543:3220:1>,"')
+    assert shown(editor) == [
+        [
+            ("Scenery Objects", "tags"),
+            ("         ", "plain"),
+            ('"<kuid2:401543:3220:1>,"', "string"),
+        ]
+    ]
+
+
 def test_a_container_name_holding_spaces_is_coloured_all_of_a_piece(editor):
     """A brace is what ends a container's name, so the space in the name of a
     screenshot belongs to the name and not to a value."""

@@ -850,9 +850,31 @@ def test_a_container_name_may_hold_spaces_up_to_the_brace_it_opens():
     assert below.tags[0].tags[0].value == "x"
 
 
+def test_a_tag_name_may_hold_spaces_up_to_its_value():
+    """A name ends where a value begins, and only a quoted string, a kuid or a
+    number can be a value: the picklist tables an asset writes are named
+    ``Scenery Objects`` and ``Default Picklist``, spaces and all."""
+    assert parse_text('Scenery Objects "<kuid2:401543:3220:1>,"').tags[0].value == (
+        "<kuid2:401543:3220:1>,"
+    )
+    assert parse_text('Scenery Objects ""').tags[0].name == "Scenery Objects"
+    assert parse_text("Default Picklist 42").tags[0].name == "Default Picklist"
+    assert parse_text("Ground Textures 1.5,2.5").tags[0].name == "Ground Textures"
+
+
+def test_a_name_of_nought_but_words_stops_at_the_first_space():
+    """A word that could not be a value - no quotes, no brackets, no number -
+    leaves the older reading in place: the first word the name, what follows it
+    a string.  Nothing that reads cleanly before changes what it means."""
+    assert parse_text("kind scenery").tags[0] == Tag("kind", (), "scenery", STRING)
+    assert parse_text("d prose <not a kuid> here").tags[0].value == "prose <not a kuid> here"
+    assert parse_text("2018-12-15 162811.jpg").tags[0].name == "2018-12-15"
+
+
 def test_a_name_holding_spaces_with_no_brace_after_it_is_a_tag_and_a_value():
-    """Only a brace lets a name run past a space; without one the name is the
-    first word and what follows it is a value, exactly as it always was."""
+    """A word that is no value of its own does not end the name before it, but
+    neither is it a value, so the file that only ever read as a name and a
+    string still reads that way."""
     assert parse_text("2018-12-15 162811.jpg") == Tag(
         "<root>", [Tag("2018-12-15", (), "162811.jpg", STRING)]
     )
@@ -1042,6 +1064,35 @@ def test_a_container_named_with_spaces_reads_as_one_container():
     check_text(text)
     assert find_problems(text) == []
     assert parse_text(text).tags[0].tags[0].name == "2018-12-15 162811.jpg"
+
+
+def test_tags_named_with_spaces_read_as_one_tag_each():
+    """The Syntax check reads a name up to its value like the reader does, so the
+    picklist tables an asset writes - ``Scenery Objects``, ``Default Picklist`` -
+    are tags in their own right and nothing is wrong with the file."""
+    text = (
+        "s20-prev-assets\n"
+        "{\n"
+        '  Track                                 ""\n'
+        '  Scenery Objects                       "<kuid2:401543:3220:1>,"\n'
+        '  Track Objects                         ""\n'
+        '  Default Picklist                      "<kuid2:72730:1080:7>,"\n'
+        '  Trains                                "<kuid:167975:1>,"\n'
+        '  Ground Textures                       ""\n'
+        '  Installed                             ""\n'
+        "}\n"
+    )
+    check_text(text)
+    assert find_problems(text) == []
+    assert [one.name for one in parse_text(text).tags[0].tags] == [
+        "Track",
+        "Scenery Objects",
+        "Track Objects",
+        "Default Picklist",
+        "Trains",
+        "Ground Textures",
+        "Installed",
+    ]
 
 
 def test_a_container_and_a_tag_of_the_same_name_written_beside_each_other_are_reported():

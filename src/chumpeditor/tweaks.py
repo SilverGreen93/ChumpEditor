@@ -132,10 +132,6 @@ __all__ = [
 #: keeps a kuid, a number and the first line of a multi line string out.
 _MEMBER = re.compile(r"([ \t]*)([A-Za-z0-9_-]+)-([0-9]+)[ \t]+\"([^\"]+)\"[ \t]*")
 
-#: a tag line with something after the name, which is how a name already in use
-#: is recognised
-_TAG_WITH_A_VALUE = re.compile(r"[ \t]*([A-Za-z0-9_-]+)[ \t]+\S.*")
-
 #: a tag whose name ends in a dash and two letters, which is how an asset marks
 #: out one language of a tag it has once of each.  Any two letters, not only the
 #: proper codes, because the assets write -cn and -jp as often as they write -zh
@@ -146,8 +142,9 @@ _LANGUAGE_TAG = re.compile(
     r"([ \t]*)([A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*)-([A-Za-z]{2})(?:[ \t]+.*)?$"
 )
 
-#: the first word of a line that is a tag line, used only to say which names the
-#: file holds
+#: the opening of a line that is a tag line at all, used to turn down a line that
+#: is somebody's prose rather than a tag.  It stops at the first space, so the
+#: name it finds is not the name of the tag: that is ``_the_name_and_the_rest``
 _A_NAME = re.compile(r"[ \t]*([A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*)")
 
 
@@ -394,21 +391,25 @@ def _turned_down_because(run: _Run, taken: set[str], owners: dict[str, _Run]) ->
 def _names_already_in_use(lines: list[str], runs: list[_Run]) -> set[str]:
     """The tags the folded up names must not collide with.
 
-    A name is in use when some other line carries that name and a value.  What
-    a run of numbered tags itself is called does not count, since those lines
-    are the ones being replaced.
+    A name is in use when some other line carries that name and a value, or
+    opens a container of that name.  What a run of numbered tags itself is
+    called does not count, since those lines are the ones being replaced.  The
+    name is read whole, the way the codec reads it, because a name may hold
+    spaces: the line writing ``Scenery Objects ""`` uses that name, not
+    ``Scenery``.
     """
     numbered = {member.tag for run in runs for member in run.members}
     taken: set[str] = set()
     inside_a_value = False
-    for line in lines:
+    for at, line in enumerate(lines):
         if inside_a_value:
             inside_a_value = not line.endswith('"')
             continue
         inside_a_value = _opens_a_running_value(line)
-        found = _TAG_WITH_A_VALUE.fullmatch(line)
-        if found and found.group(1) not in numbered:
-            taken.add(found.group(1))
+        name, rest = _the_name_and_the_rest(lines, at)
+        opens = rest == "{" or _a_brace_is_next(lines, at + 1)
+        if name and name not in numbered and (rest or opens):
+            taken.add(name)
     return taken
 
 
@@ -619,16 +620,18 @@ def _names_in_the_text(lines: list[str]) -> set[str]:
 
     Only the lines the codec reads as tag lines count: a line inside a value
     running over several lines is somebody's prose about licensing, not a tag.
+    The name is read whole, so a tag named ``Scenery Objects`` is in the text
+    under that name and not under ``Scenery``.
     """
     names: set[str] = set()
     running = False
-    for line in lines:
+    for at, line in enumerate(lines):
         if running:
             running = not line.endswith('"')
             continue
-        found = _A_NAME.match(line)
-        if found:
-            names.add(found.group(1))
+        name, _rest = _the_name_and_the_rest(lines, at)
+        if name:
+            names.add(name)
         running = _opens_a_running_value(line)
     return names
 
@@ -729,8 +732,13 @@ def _the_name_and_the_rest(lines: list[str], at: int) -> tuple[str, str]:
     The line below counts, which is what makes a container named with spaces
     read as one name: its brace is either the last word on the line or the whole
     of the line under it, and either way nothing but the brace follows the name.
+    A line of nothing but a brace names nothing, which is the one thing the
+    codec's own split does not say for us.
     """
-    return _split_name(lines[at].strip(), _a_brace_is_next(lines, at + 1))
+    stripped = lines[at].strip()
+    if not stripped or stripped in "{}":
+        return "", ""
+    return _split_name(stripped, _a_brace_is_next(lines, at + 1))
 
 
 def _the_rest_of_the_line(lines: list[str], at: int) -> str:
@@ -917,11 +925,13 @@ def _the_mesh_name_is_missing(rest: str, lines: list[str], at: int) -> str:
     return ""
 
 
-def _the_lines_holding(lines: list[str], name: str) -> list[int]:
+def _the_lines_holding(lines: list[str], name_of: str) -> list[int]:
     """The lines where a tag of this name starts, in the order they appear.
 
     Only the lines the codec reads as tag lines count: a line inside a value
-    running over several lines is somebody's prose, not a tag.
+    running over several lines is somebody's prose, not a tag.  The whole name
+    is compared, read the way the codec reads it, so a tag named ``default
+    picklist`` is not found by the name ``default``.
     """
     found: list[int] = []
     running = False
@@ -929,8 +939,8 @@ def _the_lines_holding(lines: list[str], name: str) -> list[int]:
         if running:
             running = not line.endswith('"')
             continue
-        tag = _A_NAME.match(line)
-        if tag and tag.group(1).lower() == name:
+        name, _rest = _the_name_and_the_rest(lines, at)
+        if name.lower() == name_of:
             found.append(at)
         running = _opens_a_running_value(line)
     return found

@@ -12,15 +12,16 @@ theme altogether covers the rest of the line and no more, which is how a
 comment to the end of a line would be written.
 
 The name at the start of a line is read whole, the way ``chump.parse_text``
-reads it: only a space separates a tag's name from its value, so every other
-symbol - a dot in ``junction.forward``, the brackets of a kuid name - belongs to
-the name.  A container's name runs on to the brace it opens, because such a name
-may hold spaces: ``2018-12-15 162811.jpg`` is one name.  That name is also the
-one place a theme can colour a whole sort of name at once, every tag or every
-container, so the scanner says which sort it is looking at, which needs the line
-below, hence the ``following`` argument.  A pair of the theme colours a value and
-never that name, which is how a name written ``<kuid2:1:2:3>`` is coloured as a
-name while the same thing after a space is coloured as a value.
+reads it: every symbol but a space and a brace belongs to a name, so a dot in
+``junction.forward`` and the brackets of a kuid name are part of it, and so is a
+space when what follows it is no value of its own - ``Scenery Objects`` is one
+name, and the brace a container opens is the only thing ending
+``2018-12-15 162811.jpg``.  That name is also the one place a theme can colour a
+whole sort of name at once, every tag or every container, so the scanner says
+which sort it is looking at, which needs the line below, hence the ``following``
+argument.  A pair of the theme colours a value and never that name, which is how
+a name written ``<kuid2:1:2:3>`` is coloured as a name while the same thing
+after a space is coloured as a value.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .chump import _split_name
 from .theme import CONTAINERS, TAGS, Theme
 
 __all__ = ["Span", "scan_line", "STATE_NONE"]
@@ -37,13 +39,6 @@ STATE_NONE = -1
 
 _WORD = re.compile(r"[A-Za-z0-9_-]+")
 _NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
-
-#: the first word of the name a line starts with: everything up to the space that
-#: separates a name from a value, the braces left out because they open and close
-#: a container and are never part of a name.  A container's name goes further, to
-#: the brace it opens, which is where a space belongs to it - see
-#: ``_name_at_the_head``
-_NAME = re.compile(r"[^\s{}]+")
 
 
 @dataclass(frozen=True)
@@ -133,39 +128,31 @@ def _closing(text: str, pair, start: int) -> int | None:
 def _name_at_the_head(text: str, theme: Theme, following: str, spans: list[Span]) -> int:
     """Colour the name this line starts with, and say where the rest begins.
 
-    A tag's name is the whole of the first thing on the line, because only a
-    space separates it from a value: ``junction.forward`` is one name and so is
-    ``<kuid2:66277:35027:1>``, which is why none of the theme's pairs - they
-    colour values - is tried against it here.  A container's name carries on
-    past the spaces, up to the brace it opens, because such a name may hold
-    spaces - the ``2018-12-15 162811.jpg`` of a screenshots container is one
-    name, and only the brace says where it ends.  ``chump._split_name`` cuts the
-    line in the same place, and like it a colon written straight after the name,
-    the old spelling ``name: value``, is not part of the name.
+    The name is read with ``chump._split_name``, the same cut the reader makes:
+    it runs to the first space a whole value follows, so ``junction.forward`` is
+    one name and so is ``Scenery Objects``, and it runs to the brace a container
+    opens, which is the only thing saying ``2018-12-15 162811.jpg`` is one name.
+    None of the theme's pairs is tried against a name, because those colour
+    values, and a colon written straight after the name, the old spelling
+    ``name: value``, is not part of it.
     """
     head = len(text) - len(text.lstrip())
-    first = _NAME.match(text, head)
-    if first is None:
-        return head  # a line of nothing but spaces, or one that opens with a brace
+    stripped = text.strip()
+    if not stripped or stripped[0] in "{}":
+        return head  # a line of nothing but spaces, or one of nothing but a brace
 
-    line = text.rstrip()
-    tail = line[first.end():].strip()
-    if line.endswith("{") and line.count('"') % 2 == 0:
-        # the brace opens on this line, so the name is everything before it; an
-        # odd number of quotes means the brace sits inside a value, as in
-        # ``k "{``, which is what ``chump._split_name`` makes of it too
-        name, end, role = line[head:-1].rstrip(), len(line) - 1, CONTAINERS
-    elif following.strip() == "{" and not tail.startswith(('"', "<")):
-        # the brace is kept for the line below, which still only follows a name
-        name, end, role = line[head:], len(line), CONTAINERS
-    else:
-        name, end, role = first.group(), first.end(), TAGS
+    brace_below = following.strip() == "{"
+    name, rest = _split_name(stripped, brace_below)
+    # the brace says a name runs to it, whether it ends this line or waits on
+    # the line below, where a name filling the whole line is the only thing a
+    # brace can follow
+    whole = name == stripped.rstrip(":")
+    role = CONTAINERS if rest == "{" or (brace_below and whole) else TAGS
 
-    length = len(name) - (1 if name.endswith(":") else 0)
-    style = _style_of(name[:length], theme, role)
-    if style and length:
-        spans.append(Span(head, length, style))
-    return end
+    style = _style_of(name, theme, role)  # _split_name already took off a colon
+    if style and name:
+        spans.append(Span(head, len(name), style))
+    return head + len(name)
 
 
 def _style_of(word: str, theme: Theme, role: str = "") -> str | None:

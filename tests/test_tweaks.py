@@ -308,6 +308,14 @@ def test_a_name_the_file_already_has_stops_a_lone_tag_too():
     assert "era-0 would repeat era, which the file already has" in said(text)
 
 
+def test_a_name_holding_spaces_is_not_the_shorter_name_it_starts_with():
+    """``Scenery Objects`` is one name, so it does not stand in the way of a
+    run of ``Scenery-N`` tags folding up into ``Scenery``."""
+    text = 'Scenery Objects "<kuid2:1:2:3>,"\nScenery-0 "a"\nScenery-1 "b"\n'
+    assert "Scenery  " in folded(text)
+    assert "would repeat Scenery" not in said(text)
+
+
 def test_the_first_tags_of_a_name_take_it_and_the_rest_are_left_alone():
     """Two groups would both be called era; a file with two is not a file."""
     text = 'era-0 "a"\nera-1 "b"\nkind "interior"\nera-2 "c"\nera-3 "d"\n'
@@ -783,6 +791,22 @@ def test_a_mesh_table_holding_nothing_still_stops_the_change():
     assert result.text == text
     assert result.blocked == "a mesh-table is in the file"
     assert result.summary() == "Already has a mesh-table: a mesh-table is in the file"
+
+
+def test_a_tag_named_default_picklist_is_not_the_default_mesh():
+    """The whole name is looked up, so a picklist table written inside a
+    mesh-table is not the default mesh the tweak was asked to report."""
+    text = (
+        'asset-filename "MS_Shelter_4"\n'
+        "\n"
+        "mesh-table\n"
+        "{\n"
+        '  Default Picklist                      "<kuid2:72730:1080:7>,"\n'
+        "}\n"
+    )
+    assert tweaks.convert_asset_filename_to_mesh_table(text).blocked == (
+        "a mesh-table is in the file"
+    )
 
 
 def test_a_mesh_table_found_anywhere_in_the_file_stops_the_change():

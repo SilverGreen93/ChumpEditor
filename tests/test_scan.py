@@ -339,9 +339,20 @@ def test_a_container_name_may_hold_spaces(sorts):
     ]
 
 
-def test_a_name_without_a_brace_stops_at_the_first_space(sorts):
-    """A space only belongs to a name when a brace ends that name; with no brace
-    the name is one word and what follows it is a value, coloured as one."""
+def test_a_tag_name_may_hold_spaces_up_to_its_value(sorts):
+    """A name ends where its value begins, and a value is a quoted string, a
+    kuid or a number: the spaces in ``Scenery Objects`` are followed by a word
+    that could not be a value, so they belong to the name."""
+    assert colours('Scenery Objects   "<kuid2:401543:3220:1>,"', sorts)[0] == [
+        ("Scenery Objects", "tags"),
+        ('"<kuid2:401543:3220:1>,"', "text"),
+    ]
+    assert colours("Default Picklist 42", sorts)[0][0] == ("Default Picklist", "tags")
+
+
+def test_a_name_of_nought_but_words_stops_at_the_first_space(sorts):
+    """With nothing after the spaces that could be a value, the name is the first
+    word and what follows it is read and coloured as it always was."""
     assert colours("2018-12-15 162811.jpg", sorts)[0] == [("2018-12-15", "tags")]
     assert colours('title "one two"', sorts, STATE_NONE, "{")[0] == [
         ("title", "tags"),
