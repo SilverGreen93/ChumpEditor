@@ -291,8 +291,8 @@ python build.py --only exe         # or dmg, deb, zst
 pwsh installer/build.ps1           # MSI; expects the exes build.py just made
 ```
 
-The version is written in three places - `pyproject.toml`, `VERSION` in
-`build.py` and `chumpeditor.__version__` - and they have to agree.
+The version is written in four places - `pyproject.toml`, `VERSION` in
+`build.py`, `chumpeditor.__version__` and Product.wxs - and they have to agree.
 
 The installer installs **for the current user only**, no elevation: files under
 `%LOCALAPPDATA%\Programs\ChumpEditor`, a Start Menu shortcut for the GUI, the
