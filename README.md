@@ -122,8 +122,7 @@ it, and what is saved is plain text whatever a line looked like.
   overwrite it, however often the same item was pressed before. A save makes the
   file it wrote the one you are editing; an export
   leaves the opened file on screen and the exported file is never loaded.
-- **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F),
-  Find next (F3).
+- **Edit**: Undo, Redo, Copy, Cut, Paste, Select All, Find & Replace (Ctrl+F).
 - **View**: Treeview (F2) - a tick box that puts a list of the file's containers
   along the left of the text. Wrap lines (F4) - a tick box that makes a line too
   wide for the text area stand over several rows inside it, instead of running on

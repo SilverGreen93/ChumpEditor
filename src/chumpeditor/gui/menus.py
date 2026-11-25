@@ -114,16 +114,16 @@ def _edit(menu, window: QMainWindow) -> None:
     # the ampersand that is part of the name has to be written twice, so the one
     # that marks the Alt key can sit on the R of Replace
     _add(menu, "Find && &Replace", QKeySequence("Ctrl+F"), panel.open)
-    find_next = _add(menu, "Find &next", QKeySequence("F3"), panel.find_next)
+    # going over the same search again is not asked for here: the panel answers
+    # F3 and Shift+F3 itself, from wherever the keyboard happens to be standing,
+    # and says nothing at all while it is put away
 
-    # an action that has nothing to work on is greyed out rather than beeping,
-    # and repeating a search is one of them while the panel is put away
-    for action in (undo, redo, cut, copy, find_next):
+    # an action that has nothing to work on is greyed out rather than beeping
+    for action in (undo, redo, cut, copy):
         action.setEnabled(False)
     document.undoAvailable.connect(undo.setEnabled)
     document.redoAvailable.connect(redo.setEnabled)
     editor.copyAvailable.connect(_keep_both(cut, copy))
-    panel.showing.connect(find_next.setEnabled)
 
     paste.setEnabled(editor.canPaste())
     _clipboard().dataChanged.connect(lambda: paste.setEnabled(editor.canPaste()))

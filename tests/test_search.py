@@ -13,6 +13,7 @@ from chumpeditor.search import (
     line_of,
     matches,
     next_match,
+    previous_match,
     replacements,
 )
 from chumpeditor.tweaks import Rewrite
@@ -118,6 +119,48 @@ def test_a_place_before_the_caret_means_the_file_was_gone_round():
 
 
 # ---------------------------------------------------------------------------
+# the previous place, which goes on past the top of the file
+# ---------------------------------------------------------------------------
+def test_the_previous_place_is_the_last_one_before_wherever_the_caret_stands():
+    text = "one two one two one"
+    assert previous_match(text, "one", 20) == Match(16, 19)
+    assert previous_match(text, "one", 16) == Match(8, 11)
+    assert previous_match(text, "two", 12) == Match(4, 7)
+
+
+def test_asking_before_a_match_does_not_find_that_match_again():
+    """The panel asks from just before the selection it is sitting on, which is
+    what makes pressing the same key over and over walk back up the file."""
+    assert previous_match("ab ab ab", "ab", 3) == Match(0, 2)
+
+
+def test_a_match_the_caret_stands_inside_is_left_behind():
+    """A caret in the middle of a match is not standing after it, so going back
+    from there takes the place before rather than the one under the caret."""
+    assert previous_match("ab ab ab", "ab", 4) == Match(0, 2)
+
+
+def test_a_search_that_finds_nothing_before_the_caret_starts_at_the_end_again():
+    text = "one two one"
+    assert previous_match(text, "one", 1) == Match(8, 11)
+    assert previous_match(text, "two", 0) == Match(4, 7)
+
+
+def test_a_search_backwards_with_nowhere_to_find_it_says_so():
+    assert previous_match(TEXT, "mesh-table", 0) is None
+    assert previous_match("", "kind", 0) is None
+    assert previous_match(TEXT, "", 0) is None
+
+
+def test_a_place_after_the_caret_means_the_file_was_gone_round():
+    """Nothing was found before the caret, so the answer came from the bottom
+    again; the panel tells that story from where the answer stands."""
+    found = previous_match("kind kind", "kind", 1)
+    assert found == Match(5, 9)
+    assert found.start > 1
+
+
+# ---------------------------------------------------------------------------
 # putting something in their places
 # ---------------------------------------------------------------------------
 def test_every_place_becomes_a_stretch_to_cut_out_with_its_replacement():
@@ -156,6 +199,63 @@ def test_replacing_the_lot_follows_the_case_as_well():
 def test_nothing_is_cut_out_when_the_text_is_nowhere_in_the_file():
     assert replacements(TEXT, "mesh-table", "mesh") == []
     assert replacements(TEXT, "", "mesh") == []
+
+
+# ---------------------------------------------------------------------------
+# whole words only, which is what the panel's second tick box asks for
+# ---------------------------------------------------------------------------
+HALF_AND_WHOLE = "kuid-table kuid <kuid:1:2>"
+
+
+def test_a_whole_word_is_not_found_inside_a_longer_one():
+    assert find_all(HALF_AND_WHOLE, "kuid") == [Match(0, 4), Match(11, 15), Match(17, 21)]
+    assert find_all(HALF_AND_WHOLE, "kuid", whole_word=True) == [
+        Match(11, 15), Match(17, 21)
+    ]
+
+
+def test_a_dash_carries_a_word_on_rather_than_edging_it():
+    """``kuid-table`` is one name in this format, so neither half of it is a word
+    on its own; a plain ``\\b`` would call both of them whole."""
+    assert find_all("kuid-table", "table") == [Match(5, 10)]
+    assert find_all("kuid-table", "table", whole_word=True) == []
+    assert find_all("kuid-table", "kuid-table", whole_word=True) == [Match(0, 10)]
+
+
+def test_an_underscore_carries_a_word_on_as_well():
+    assert find_all("mesh_file", "mesh", whole_word=True) == []
+    assert find_all("mesh file", "mesh", whole_word=True) == [Match(0, 4)]
+
+
+def test_punctuation_around_a_name_does_not_carry_it_on():
+    """A kuid is hemmed in by brackets and colons, and each number written
+    between them is still a word of its own."""
+    text = "<kuid2:66277:35027:1>"
+    assert find_all(text, "66277", whole_word=True) == [Match(7, 12)]
+    assert find_all(text, "kuid2", whole_word=True) == [Match(1, 6)]
+
+
+def test_a_whole_word_is_asked_for_alongside_letters_that_matter():
+    text = "KUID kuid-table"
+    assert find_all(text, "kuid", whole_word=True) == []
+    assert find_all(text, "kuid", match_case=False, whole_word=True) == [Match(0, 4)]
+
+
+def test_a_whole_word_search_with_nothing_asked_for_finds_nothing():
+    assert find_all(HALF_AND_WHOLE, "", whole_word=True) == []
+
+
+def test_a_whole_word_search_walks_the_same_ring_forwards_and_back():
+    text = "kuid kuid-table kuid"
+    assert next_match(text, "kuid", 4, whole_word=True) == Match(16, 20)
+    assert next_match(text, "kuid", 17, whole_word=True) == Match(0, 4)
+    assert previous_match(text, "kuid", 16, whole_word=True) == Match(0, 4)
+
+
+def test_replacing_the_lot_respects_a_whole_word_search():
+    assert replacements("kuid kuid-table", "kuid", "id", whole_word=True) == [
+        Rewrite(0, 4, "id")
+    ]
 
 
 # ---------------------------------------------------------------------------

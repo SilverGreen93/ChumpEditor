@@ -863,7 +863,7 @@ def test_the_write_shortcuts_answer_to_the_menu_not_to_the_names(window, tmp_pat
 def test_the_edit_menu_is_the_usual_set_of_edits(window):
     assert labels(menu_of(window, "Edit")) == [
         "Undo", "Redo", "-", "Cut", "Copy", "Paste", "Select All", "-",
-        "Find & Replace", "Find next",
+        "Find & Replace",
     ]
     assert [keys(window, "Edit", name) for name in
             ("Undo", "Redo", "Cut", "Copy", "Paste", "Select All")] == [
@@ -940,29 +940,50 @@ def test_the_panel_is_up_under_the_text_when_the_window_is_up(qapp, window):
     assert strip.top() >= text.bottom()
 
 
-def test_the_panel_holds_two_boxes_a_checkbox_and_four_buttons(window):
+def test_the_panel_holds_two_boxes_two_checkboxes_and_five_buttons(window):
     panel = window.find_panel
     assert panel.find_field.placeholderText()
     assert panel.replace_field.placeholderText()
     assert panel.match_case.text() == "Match case"
+    assert panel.whole_word.text() == "Whole word"
+    assert panel.whole_word.toolTip()
     assert {one.text() for one in panel.findChildren(QPushButton)} == {
-        "Find next (F3)", "Replace", "Replace all", "Close",
+        "Find next (F3)", "Find prev (Shift+F3)", "Replace", "Replace all", "Close",
     }
 
 
-def test_the_search_is_asked_for_from_the_edit_menu(window):
-    assert keys(window, "Edit", "Find & Replace") == "Ctrl+F"
-    assert keys(window, "Edit", "Find next") == "F3"
+def test_the_widgets_that_belong_together_stand_one_over_the_other(shown, qapp):
+    """The two tick boxes stand one over the other, and so do the two searches
+    and the two changes, so which widget goes with which is told by the way they
+    stand as well as by what they say."""
+    panel = shown.find_panel
+    panel.open()
+    qapp.processEvents()
 
-    # repeating a search is worth having only while the panel is up
-    assert not item(window, "Edit", "Find next").isEnabled()
+    def stands_at(button) -> tuple[int, int]:
+        place = button.mapTo(panel, QPoint(0, 0))
+        return place.x(), place.y()
+
+    for above, below in (
+        (panel.match_case, panel.whole_word),
+        (panel.find_next_button, panel.find_prev_button),
+        (panel.replace_button, panel.replace_all_button),
+    ):
+        assert stands_at(above)[0] == stands_at(below)[0]
+        assert stands_at(below)[1] > stands_at(above)[1]
+
+
+def test_the_menu_asks_for_the_panel_and_the_panel_answers_the_keys(window):
+    """Only bringing the panel up is asked for from the menu; going over the same
+    search again is a key, which is one less thing to reach through a menu."""
+    assert keys(window, "Edit", "Find & Replace") == "Ctrl+F"
+    assert "Find next" not in labels(menu_of(window, "Edit"))
+    assert "Find prev" not in labels(menu_of(window, "Edit"))
+
     click(window, "Edit", "Find & Replace")
     assert not window.find_panel.isHidden()
-    assert item(window, "Edit", "Find next").isEnabled()
-
     press(window, "Close")
     assert window.find_panel.isHidden()
-    assert not item(window, "Edit", "Find next").isEnabled()
 
 
 def test_ctrl_F_brings_the_panel_up_and_escape_puts_it_away(qapp, window):
@@ -987,6 +1008,85 @@ def test_the_keyboard_stays_in_the_find_box_while_the_search_is_pressed(qapp, wi
     assert window._message == "Found on line 1"
     assert window.find_panel.find_field.text() == "kuid"
     assert window.find_panel.find_field.hasFocus()
+
+
+def test_the_two_search_keys_answer_from_the_text_while_the_panel_is_up(qapp, window):
+    """The keys repeat a search from wherever the keyboard stands: forwards on
+    one press and back on the next, with nothing said once the panel is away."""
+    window.editor.setPlainText(SEEKING)
+    press_key(qapp, window, window.editor, "Ctrl+F")
+    window.find_panel.find_field.setText("kuid")
+
+    press_key(qapp, window, window.editor, "F3")
+    assert window._message == "Found on line 1"
+    press_key(qapp, window, window.editor, "F3")
+    assert window._message == "Found on line 3"
+    press_key(qapp, window, window.editor, "Shift+F3")
+    assert window._message == "Found on line 1"
+    assert window.editor.textCursor().selectionStart() == SEEKING.index("kuid")
+
+    press(window, "Close")
+    window._message = "nothing said yet"
+    press_key(qapp, window, window.editor, "F3")
+    press_key(qapp, window, window.editor, "Shift+F3")
+    assert window._message == "nothing said yet"
+
+
+def test_Find_prev_walks_back_up_the_file_the_same_way(window):
+    """One press goes back one place, and the places come round again past the
+    top of the file rather than stopping there."""
+    window.editor.setPlainText(SEEKING)
+    click(window, "Edit", "Find & Replace")
+    window.find_panel.find_field.setText("kuid")
+    press(window, "Find next (F3)")
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 3"
+
+    press(window, "Find prev (Shift+F3)")
+    assert window._message == "Found on line 1"
+    press(window, "Find prev (Shift+F3)")
+    assert window._message == "Found on line 3, from the end of the file again"
+
+
+def test_the_whole_word_box_leaves_a_half_word_where_it_is(window):
+    """Ticked, a sought text standing inside a longer word is passed over, and
+    the very same search finds it again once the tick is taken off."""
+    window.editor.setPlainText("kuid-table kuid\n")
+    click(window, "Edit", "Find & Replace")
+    panel = window.find_panel
+    panel.find_field.setText("kuid")
+
+    press(window, "Find next (F3)")
+    assert window.editor.textCursor().selectionStart() == 0
+
+    panel.whole_word.setChecked(True)
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 1"
+    assert window.editor.textCursor().selectionStart() == 11
+
+    panel.find_field.setText("table")
+    press(window, "Find next (F3)")
+    assert window._message == "Nothing in the file says table"
+
+    panel.whole_word.setChecked(False)
+    press(window, "Find next (F3)")
+    assert window._message == "Found on line 1, from the top of the file again"
+    assert window.editor.textCursor().selectionStart() == 5
+
+
+def test_replacing_the_lot_with_the_box_tick_leaves_longer_words_alone(window):
+    """Whole word reaches Replace all as well, so the half-words in the middle of
+    a longer one keep their letters."""
+    window.editor.setPlainText("kuid kuid-table kuid\n")
+    click(window, "Edit", "Find & Replace")
+    panel = window.find_panel
+    panel.find_field.setText("kuid")
+    panel.replace_field.setText("tag")
+    panel.whole_word.setChecked(True)
+
+    press(window, "Replace all")
+    assert window.editor.toPlainText() == "tag kuid-table tag\n"
+    assert window._message == "Replaced 2 places"
 
 
 def test_the_panel_offers_what_is_selected_as_the_text_to_look_for(window):
