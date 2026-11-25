@@ -777,6 +777,25 @@ def test_a_float_is_written_as_shortly_as_a_float32_allows():
     )
 
 
+def test_a_float_is_written_with_a_decimal_point_however_whole_it_is():
+    """A float that holds 5 still says it holds a float, so the text reads back
+    as the float the bytes mean and not as an integer."""
+    assert render_text(Tag("<root>", [Tag("k", (), 5.0, FLOAT32)])) == (
+        "\r\nk" + " " * 39 + "5.0\r\n"
+    )
+    assert render_text(Tag("<root>", [Tag("k", (), [5.0, 6.1, 7.03], FLOAT32)])) == (
+        "\r\nk" + " " * 39 + "5.0,6.1,7.03\r\n"
+    )
+
+
+def test_the_float32_values_of_a_chump_file_are_written_with_a_decimal_point():
+    """Opening a .chump whose float list is whole numbers shows them as floats:
+    the bytes say float32, so the text says so too."""
+    root = Tag("<root>", [Tag("test4", (), [5, 6.1, 7.03], FLOAT32)])
+    again = parse_chump(pack_chump(root))
+    assert render_text(again).endswith("test4" + " " * 35 + "5.0,6.1,7.03\r\n")
+
+
 def test_a_value_of_a_type_the_reader_does_not_know_is_written_back_as_it_came():
     # the text form cannot say what the bytes meant, so they go out verbatim,
     # the way the original expander wrote them; the tag keeps its type byte
@@ -814,9 +833,22 @@ def test_a_run_of_values_reads_as_one_tag():
     assert parse_text("k -1.058,0.522").tags[0].value_type == FLOAT32
 
 
-def test_a_run_of_values_that_mixes_types_is_refused():
-    with pytest.raises(ChumpError, match="mixes a type 0x01 with a type 0x02"):
-        parse_text("k 1,2.5")
+def test_a_run_of_numbers_holding_a_float_is_a_run_of_floats():
+    """Trainz writes a vector of mostly whole numbers with a decimal point on
+    one of them, and one float makes the whole run a list of floats."""
+    tag = parse_text("test4" + " " * 33 + "5,6.1,7.03").tags[0]
+    assert tag.value == [5.0, 6.1, 7.03]
+    assert tag.value_type == FLOAT32
+    assert find_problems("test4" + " " * 33 + "5,6.1,7.03") == []
+
+
+def test_a_run_of_values_that_mixes_a_number_and_a_word_is_refused():
+    """A float may take in the whole numbers beside it; a word takes nothing in,
+    and a list of a number and a word is a file two types were written into."""
+    with pytest.raises(ChumpError, match="mixes a type 0x02 with a type 0x03"):
+        parse_text("k 1,2.5,three")
+    with pytest.raises(ChumpError, match="mixes a type 0x02 with a type 0x0d"):
+        parse_text("k 1,2.5,<kuid:1:2>")
 
 
 def test_a_run_of_values_with_a_missing_element_is_refused():

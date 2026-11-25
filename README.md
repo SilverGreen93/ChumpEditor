@@ -315,6 +315,9 @@ See [chump-format.md](chump-format.md) for the reference. The short version:
   and a value.
 - Type bytes: `0x00` container, `0x01` int32, `0x02` float32, `0x03` string,
   `0x04` binary, `0x05` null (a tag with no value), `0x06` int64, `0x0D` kuid.
+- A tag can hold a run of numbers written comma separated, and one float makes
+  them all floats: `5,6.1,7.03` is three floats, and a float is always written
+  with a decimal point, so it comes back as `5.0,6.1,7.03`.
 - Every number in the file is little-endian. A kuid is two 32-bit words: the
   first holds 25 bits of signed uid with 7 bits of asset version above them,
   the second is a signed 32-bit content id. Only a positive uid can carry a

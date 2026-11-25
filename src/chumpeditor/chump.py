@@ -693,8 +693,12 @@ def _render_one(value: object, value_type: int | None) -> str:
         return str(value)
     if isinstance(value, str):
         return f'"{value}"'
-    if isinstance(value, float):
-        return _format_float(value)
+    if isinstance(value, float) or (
+        value_type == TagType.FLOAT32 and isinstance(value, int)
+    ):
+        # a float tag says so with a decimal point, even when the value it holds
+        # is a whole number or was handed over as a plain int
+        return _format_float(float(value))
     if isinstance(value, (bytes, bytearray)):
         return value.decode(TEXT_ENCODING, "surrogateescape")
     if isinstance(value, RawValue):
@@ -703,7 +707,12 @@ def _render_one(value: object, value_type: int | None) -> str:
 
 
 def _format_float(value: float) -> str:
-    """Round to the digits a float32 holds, then drop trailing zeros (G style)."""
+    """Round to the digits a float32 holds, then drop trailing zeros (G style).
+
+    A float is always written with a decimal point, so a whole one says
+    ``5.0``: the text then reads back as the float the bytes say it is, and a
+    list of them does not turn into a list of integers on the way out.
+    """
     if value != value:  # NaN
         return "NaN"
     if value in (float("inf"), float("-inf")):
@@ -711,8 +720,13 @@ def _format_float(value: float) -> str:
     text = f"{value:.{7 if abs(value) < 1e7 else 15}g}"
     if "e" in text:
         mantissa, _, exponent = text.partition("e")
-        return f"{mantissa}e{int(exponent):+d}"
-    return text
+        return f"{_with_a_decimal(mantissa)}e{int(exponent):+d}"
+    return _with_a_decimal(text)
+
+
+def _with_a_decimal(text: str) -> str:
+    """The number with at least one decimal digit, which ``5.0`` is and ``5`` is not."""
+    return text if "." in text else f"{text}.0"
 
 
 # --------------------------------------------------------------------------
@@ -1151,6 +1165,12 @@ def _unbalanced_brackets(name: str, line: int, value: str) -> Problem | None:
     return None
 
 
+#: the type codes that are one kind of number in a run written comma separated:
+#: a run holding a float holds floats, whole numbers and all, so an int written
+#: beside a float is that same float and not a second type in the tag
+_THE_NUMBERS = (TagType.INT32, TagType.INT64, TagType.FLOAT32)
+
+
 def _parse_value_text(
     rest: str, lines: list[str], index: int, eol: str, name: str, opened_at: int
 ) -> tuple[object, int, int]:
@@ -1179,20 +1199,28 @@ def _parse_value_text(
     if len(parts) > 1:
         # a run of numbers written comma separated, like a vector: stored as
         # one tag holding several values of the same type, no array header
-        values, value_type = [], None
+        values: list[object] = []
+        types: list[int] = []
         for part in parts:
             if not part:
                 raise ChumpError(f"the value {rest!r} has an empty element")
             value, part_type, index = _parse_one_text(part, lines, index, eol, name, opened_at)
-            if value_type is None:
-                value_type = part_type
-            elif part_type != value_type:
-                raise ChumpError(
-                    f"the value {rest!r} mixes a type 0x{value_type:02x} "
-                    f"with a type 0x{part_type:02x}"
-                )
             values.append(value)
-        return values, value_type, index
+            types.append(part_type)
+        if TagType.FLOAT32 in types:
+            # one number written with a decimal point makes the whole run a list
+            # of floats, which is how Trainz writes a vector of mostly whole
+            # numbers: the 5,6.1,7.03 of a test4 tag is three floats and not a
+            # file that mixes two types
+            types = [TagType.FLOAT32 if one in _THE_NUMBERS else one for one in types]
+        if len(set(types)) > 1:
+            other = next(one for one in types if one != types[0])
+            raise ChumpError(
+                f"the value {rest!r} mixes a type 0x{types[0]:02x} with a type 0x{other:02x}"
+            )
+        if types[0] == TagType.FLOAT32:
+            values = [float(value) for value in values]
+        return values, types[0], index
 
     return _parse_one_text(rest, lines, index, eol, name, opened_at)
 
