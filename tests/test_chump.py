@@ -628,6 +628,17 @@ def test_render_a_container():
     assert text == "\r\nt\r\n{\r\n  k" + " " * 37 + "1\r\n}\r\n"
 
 
+def test_a_container_named_with_spaces_is_written_out_and_read_back():
+    """The name goes on a line of its own with the brace under it, so a container
+    named with spaces comes back as the one container it was."""
+    root = Tag("<root>", [
+        Tag.container("2018-12-15 162811.jpg", [Tag("tags", (), "x", STRING)]),
+    ])
+    text = render_text(root)
+    assert "2018-12-15 162811.jpg\r\n{" in text
+    assert parse_text(text) == root
+
+
 def test_a_container_is_indented_two_spaces_per_level():
     text = render_text(Tag("<root>", [
         Tag.container("a", [Tag.container("b", [Tag("k", (), 1, INT32)])]),
@@ -828,6 +839,40 @@ def test_the_braces_of_a_container_are_the_only_structure():
     assert four.tags[0].tags[0].value == 1
 
 
+def test_a_container_name_may_hold_spaces_up_to_the_brace_it_opens():
+    """The brace is what ends a container's name, so a name written with a space
+    in it - the file name a screenshots container is named after - is one name,
+    whether the brace stands at the end of the line or on the line below."""
+    below = parse_text("2018-12-15 162811.jpg\n{\n  tags \"x\"\n}\n")
+    same_line = parse_text("2018-12-15 162811.jpg {\n  tags \"x\"\n}\n")
+    assert below == same_line
+    assert below.tags[0].name == "2018-12-15 162811.jpg"
+    assert below.tags[0].tags[0].value == "x"
+
+
+def test_a_name_holding_spaces_with_no_brace_after_it_is_a_tag_and_a_value():
+    """Only a brace lets a name run past a space; without one the name is the
+    first word and what follows it is a value, exactly as it always was."""
+    assert parse_text("2018-12-15 162811.jpg") == Tag(
+        "<root>", [Tag("2018-12-15", (), "162811.jpg", STRING)]
+    )
+
+
+def test_a_brace_of_its_own_opens_a_container_however_close_it_stands():
+    """A brace ending the line ends a container's name even with no space before
+    it, while a brace inside a quoted value stays part of that value."""
+    assert parse_text("mesh-table{\n}\n").tags[0].name == "mesh-table"
+    assert parse_text('k "{\n}"\n').tags[0].value == "{\n}"
+
+
+def test_a_value_before_a_brace_on_the_line_below_is_still_a_value():
+    """A quoted value or a kuid is a value already, so a brace kept for the line
+    under it opens nothing and names nothing."""
+    for name in ('k "one two"', "k <kuid:1:2>"):
+        with pytest.raises(ChumpError, match=r"line 2: '\{' without a tag name before it"):
+            parse_text(f"{name}\n{{\n}}\n")
+
+
 def test_blank_lines_are_ignored():
     assert parse_text("\n\nt\n{\n\n}\n\n").tags[0] == Tag("t", [])
 
@@ -838,8 +883,9 @@ def test_a_container_that_is_never_closed_is_reported():
 
 
 def test_a_brace_with_nothing_before_it_is_reported():
+    # the line above the brace already holds a value, so nothing names the brace
     with pytest.raises(ChumpError, match=r"line 2: '\{' without a tag name before it"):
-        parse_text("t 1\n{\n}\n")
+        parse_text('t "1"\n{\n}\n')
 
 
 def test_a_closing_brace_at_the_top_level_is_reported():
@@ -977,6 +1023,25 @@ def test_two_containers_of_one_name_at_the_same_level_are_reported():
             "\n"
             "kuid-table\n{\n1 <kuid:23:23>\n}\n"
         )
+
+
+def test_a_container_named_with_spaces_reads_as_one_container():
+    """What the reader accepts, the check accepts: a container named after a file
+    name holds a space and nothing else, so no name is repeated and no brace is
+    left without a name before it."""
+    text = (
+        "screenshots\n"
+        "{\n"
+        "  2018-12-15 162811.jpg\n"
+        "  {\n"
+        '    tags                                "Trainz Railroad Simulator 2019"\n'
+        '    caption                             ""\n'
+        "  }\n"
+        "}\n"
+    )
+    check_text(text)
+    assert find_problems(text) == []
+    assert parse_text(text).tags[0].tags[0].name == "2018-12-15 162811.jpg"
 
 
 def test_a_container_and_a_tag_of_the_same_name_written_beside_each_other_are_reported():

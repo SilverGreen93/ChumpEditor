@@ -48,6 +48,21 @@ def test_an_empty_container_still_counts_as_one():
     assert spelled("obsolete-table\n{\n}\n") == [("obsolete-table", 0, 1)]
 
 
+def test_a_name_holding_spaces_up_to_the_brace_it_opens():
+    """A container's name is the whole line its brace opens, so a container named
+    after a file name takes one row of the tree and is named as it is written."""
+    assert spelled(
+        "screenshots\n"
+        "{\n"
+        "  2018-12-15 162811.jpg\n"
+        "  {\n"
+        '    tags                                "Trainz Railroad Simulator 2019"\n'
+        "  }\n"
+        "}\n"
+    ) == [("screenshots", 0, 1), ("2018-12-15 162811.jpg", 1, 3)]
+    assert spelled("2018-12-15 162811.jpg {\n}\n") == [("2018-12-15 162811.jpg", 0, 1)]
+
+
 def test_a_brace_closed_on_the_line_it_opened_is_a_value_not_a_container():
     """``name { ... }`` on one line is what the codec reads as a value, so the
     tree leaves it out: there is nothing to open up under it."""

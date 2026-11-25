@@ -327,6 +327,28 @@ def test_a_name_may_be_written_as_a_number(sorts):
     assert colours("2.7 1", sorts)[0] == [("2.7", "tags")]
 
 
+def test_a_container_name_may_hold_spaces(sorts):
+    """A container's name runs to the brace it opens, which is the only thing
+    that says where it ends: a screenshots container is named after a file, and
+    a file name says ``2018-12-15 162811.jpg``."""
+    assert colours("2018-12-15 162811.jpg {", sorts)[0] == [
+        ("2018-12-15 162811.jpg", "containers")
+    ]
+    assert colours("  2018-12-15 162811.jpg", sorts, STATE_NONE, "{")[0] == [
+        ("2018-12-15 162811.jpg", "containers")
+    ]
+
+
+def test_a_name_without_a_brace_stops_at_the_first_space(sorts):
+    """A space only belongs to a name when a brace ends that name; with no brace
+    the name is one word and what follows it is a value, coloured as one."""
+    assert colours("2018-12-15 162811.jpg", sorts)[0] == [("2018-12-15", "tags")]
+    assert colours('title "one two"', sorts, STATE_NONE, "{")[0] == [
+        ("title", "tags"),
+        ('"one two"', "text"),
+    ]
+
+
 def test_a_brace_is_not_a_name_of_a_sort(sorts):
     assert colours("{", sorts)[0] == []
     assert colours("}", sorts)[0] == []

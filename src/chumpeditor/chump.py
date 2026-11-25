@@ -737,7 +737,9 @@ def parse_text(text: str) -> Tag:
     The text form is the one the expander emits: one tag per line, its value
     after a gap of spaces, containers as a ``{`` / ``}`` pair at the parent's
     indent.  A value that starts with a quote can span lines, which is how the
-    multi line license strings of a config.txt survive a round trip.
+    multi line license strings of a config.txt survive a round trip.  A tag's
+    name is one word, but a container's name runs to the brace it opens and may
+    hold spaces - ``2018-12-15 162811.jpg`` names a screenshot.
     """
     lines, eol = _split_lines(text)
     tags, index = _parse_lines(lines, 0, eol)
@@ -782,7 +784,7 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
         if stripped == "{":
             raise ChumpError(str(_brace_with_no_name(index + 1)))
 
-        name, rest = _split_name(stripped)
+        name, rest = _split_name(stripped, _a_brace_below(lines, index))
         opened_at = index
         index += 1
         if rest == "{":
@@ -808,14 +810,42 @@ def _parse_lines(lines: list[str], index: int, eol: str) -> tuple[list[Tag], int
     return tags, index
 
 
-def _split_name(stripped: str) -> tuple[str, str]:
-    """A tag name and the text after the spaces that separate it from a value."""
+def _split_name(stripped: str, brace_below: bool = False) -> tuple[str, str]:
+    """A tag name and the text after the spaces that separate it from a value.
+
+    A tag's name is one word, because only a space separates it from its value.
+    A container's name is the whole line up to the brace it opens, because such
+    a name may hold spaces - the ``2018-12-15 162811.jpg`` of a screenshots
+    container is one name, and the brace is the only thing that says where it
+    ends.  A brace is read as that container's own when it ends the line, spaces
+    before it or not, or when it is kept for the line below, which is what
+    ``brace_below`` says.  A brace inside a quoted value, the ``{`` of ``k "{``
+    whose value carries on below, belongs to the value; and a line already
+    ending with a quoted value or a kuid holds a value, so a brace kept for the
+    line under it names nothing.
+    """
     parts = stripped.split(None, 1)
+    if not parts:
+        return "", ""  # nothing on the line at all: no name and no value
     name = parts[0]
+    rest = parts[1].strip() if len(parts) > 1 else ""
+    if stripped.endswith("{") and stripped != "{" and stripped.count('"') % 2 == 0:
+        # the line ends with a brace of its own, and a brace only ever stands
+        # alone at the end of a name's line: what is written before it, spaces
+        # and all, is the container's name.  An odd number of quotes says the
+        # brace belongs to a value instead, the ``{`` of ``k "{`` which carries
+        # on below
+        name, rest = stripped[:-1].rstrip(), "{"
+    elif brace_below and not rest.startswith(('"', "<")):
+        name, rest = stripped, ""
     if name.endswith(":"):  # tolerate the config.txt spelling "name: value"
         name = name[:-1]
-    rest = parts[1].strip() if len(parts) > 1 else ""
     return name, rest
+
+
+def _a_brace_below(lines: list[str], at: int) -> bool:
+    """Whether the line under this one is a ``{`` kept for the name above it."""
+    return at + 1 < len(lines) and lines[at + 1].strip() == "{"
 
 
 def check_text(text: str) -> Tag:
@@ -947,7 +977,7 @@ def _scan_lines(
             index = _the_body_of(lines, index + 1, "", index, written, problems)
             continue
 
-        name, rest = _split_name(stripped)
+        name, rest = _split_name(stripped, _a_brace_below(lines, index))
         opened_at = index
         index += 1
         if '"' in name:

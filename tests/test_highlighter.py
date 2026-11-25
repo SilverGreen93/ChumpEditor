@@ -170,6 +170,31 @@ def test_a_name_with_a_dot_in_it_is_coloured_all_of_a_piece(editor):
     assert shown(editor) == [[("junction.forward", "tags"), (" 1", "plain")]]
 
 
+def test_a_container_name_holding_spaces_is_coloured_all_of_a_piece(editor):
+    """A brace is what ends a container's name, so the space in the name of a
+    screenshot belongs to the name and not to a value."""
+    editor.setPlainText("2018-12-15 162811.jpg {")
+    assert shown(editor) == [
+        [("2018-12-15 162811.jpg", "containers"), (" {", "plain")]
+    ]
+
+
+def test_a_container_name_holding_spaces_asks_only_for_its_brace_below(editor):
+    """The other way of writing the same container, where the line below is the
+    only thing saying this name holds a space."""
+    editor.setPlainText("2018-12-15 162811.jpg\n{")
+    assert shown(editor) == [
+        [("2018-12-15 162811.jpg", "containers")],
+        [("{", "plain")],
+    ]
+
+
+def test_a_name_holding_spaces_with_no_brace_after_it_is_a_tag_and_a_value(editor):
+    """No brace to end the name, so it stops at the first space like any other."""
+    editor.setPlainText("2018-12-15 162811.jpg")
+    assert shown(editor) == [[("2018-12-15", "tags"), (" 162811.jpg", "plain")]]
+
+
 def test_a_tag_named_with_a_kuid_is_coloured_as_a_tag(editor):
     """A kuid table names each asset it holds with a kuid, and a name is coloured
     for being a name: the kuid rule colours a value, never the name before it."""
@@ -269,6 +294,17 @@ def test_taking_the_brace_away_makes_the_name_a_tag_again(editor):
     cursor.deleteChar()
     editor.setTextCursor(cursor)
     assert shown(editor)[0] == [("mesh-table", "tags")]
+
+
+def test_a_brace_typed_below_a_name_holding_spaces_colours_the_name_as_one(editor):
+    """The line that changes is the brace's, but the name above it is the one
+    that turns out to hold a space."""
+    editor.setPlainText("2018-12-15 162811.jpg\n")
+    assert shown(editor)[0] == [("2018-12-15", "tags"), (" 162811.jpg", "plain")]
+
+    editor.moveCursor(QTextCursor.MoveOperation.End)
+    editor.insertPlainText("{")
+    assert shown(editor)[0] == [("2018-12-15 162811.jpg", "containers")]
 
 
 def test_typing_on_a_line_recolours_only_that_line(editor):

@@ -30,9 +30,11 @@ from ..theme import Style, Theme
 
 __all__ = ["ThemeHighlighter"]
 
-#: a line holding one name and nothing else, which is the shape that a brace on
-#: the line below can turn into a container
-_NAME = re.compile(r"\s*[^\s{}]+\s*")
+#: a line holding a name and nothing but that name, which is the shape a brace on
+#: the line below can turn into a container; the name may hold spaces, since a
+#: container's name does, so only a brace of its own says the line is something
+#: else - a value, which the ``{`` below cannot follow
+_NAME = re.compile(r"\s*[^\s{}][^{}]*")
 
 
 def _format(style: Style, dark: bool = False) -> QTextCharFormat:

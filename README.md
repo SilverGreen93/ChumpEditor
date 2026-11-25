@@ -320,6 +320,9 @@ See [chump-format.md](chump-format.md) for the reference. The short version:
   the second is a signed 32-bit content id. Only a positive uid can carry a
   version, which is what separates a `<kuid2:uid:cid:version>` from a
   `<kuid:uid:cid>`.
+- A name is stored with its own length and a NUL, so it may hold spaces. In the
+  text form a container's name runs to the `{` it opens, which is how the
+  `2018-12-15 162811.jpg` inside a screenshots container is one name.
 
 Two places where the written spec and the files disagree, resolved in favour of
 the bytes: the spec never lists `0x05` or `0x0D`, and `kuid-format.md` says a

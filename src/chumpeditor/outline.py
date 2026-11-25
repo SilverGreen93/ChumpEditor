@@ -9,19 +9,22 @@ A container here is a tag written with braces - ``kuid-table``, ``mesh-table``
 and whatever stands inside them - and nothing else: a tag holding one value on
 its own line is a single line tag and gets no row of its own.  An empty
 container still counts as one, which is how the ``obsolete-table {}`` at the end
-of an asset shows up.
+of an asset shows up.  A container's name may hold spaces, since the brace says
+where it ends: the ``2018-12-15 162811.jpg`` inside a screenshots container is
+one name, and one row of the tree.
 
 The lines are walked by hand rather than read with ``chump.parse_text``, for two
 reasons: the parser throws the line numbers away, and it refuses a file that
 writes one name twice, which text being edited does all the time.  The walk
 follows the codec's own rules all the same - the brace placement of
 ``tweaks._the_brace_the_tag_opens``, the running value of
-``tweaks._opens_a_running_value``, and ``chump._split_name``, which is what reads
-a line as a name and what follows it - so a line inside somebody's multi-line
-license string is never mistaken for a tag, and the three ways of writing a
-container all read the way the codec reads them.  A closing brace closes a level
-even when the line that opened it could not be read, which is what keeps one
-unclosed container from swallowing the rest of the file.
+``tweaks._opens_a_running_value``, and ``chump._split_name`` and
+``chump._a_brace_below``, which together read a line as a name and what follows
+it - so a line inside somebody's multi-line license string is never mistaken for
+a tag, and the three ways of writing a container all read the way the codec
+reads them.  A closing brace closes a level even when the line that opened it
+could not be read, which is what keeps one unclosed container from swallowing
+the rest of the file.
 
 Every line number counts from 1, the way ``chump.find_problems``,
 ``search.line_of`` and the numbers down the left of the editor count them, so a
@@ -32,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .chump import _split_lines, _split_name
+from .chump import _a_brace_below, _split_lines, _split_name
 from .tweaks import _opens_a_running_value
 
 __all__ = ["Container", "containers"]
@@ -94,7 +97,7 @@ def containers(text: str) -> list[Container]:
             index += 1
             continue
 
-        name, rest = _split_name(stripped)
+        name, rest = _split_name(stripped, _a_brace_below(lines, index))
         if rest == "{":
             found.append(_a_container(name, parents, index))
             parents.append(name)
@@ -120,7 +123,7 @@ def containers(text: str) -> list[Container]:
                 index = closed + 1 if closed is not None else index
             continue
         if not rest:
-            if index + 1 < len(lines) and lines[index + 1].strip() == "{":
+            if _a_brace_below(lines, index):
                 # the name alone, its brace kept for the line below
                 found.append(_a_container(name, parents, index))
                 parents.append(name)

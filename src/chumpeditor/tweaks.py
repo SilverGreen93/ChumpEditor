@@ -106,7 +106,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .chump import VALUE_COLUMN
+from .chump import VALUE_COLUMN, _split_name
 
 __all__ = [
     "Conversion",
@@ -681,7 +681,7 @@ def _the_container_ends_at(lines: list[str], where: int, depth: int) -> int | No
                 return line
             line += 1
             continue
-        rest = _the_rest_of(stripped)
+        rest = _the_rest_of_the_line(lines, line)
         if rest == "{":
             depth += 1
             line += 1
@@ -713,9 +713,29 @@ def _a_brace_is_next(lines: list[str], where: int) -> bool:
 
 
 def _the_rest_of(stripped: str) -> str:
-    """The text after a tag name, the way the codec separates the two."""
-    parts = stripped.split(None, 1)
-    return parts[1].strip() if len(parts) > 1 else ""
+    """The text after a tag name, the way the codec separates the two.
+
+    This is ``chump._split_name`` asked for the second half only, so a line
+    whose last word is a bare ``{`` gives back that brace rather than the rest
+    of a container's name, which may hold spaces.
+    """
+    return _split_name(stripped)[1]
+
+
+def _the_name_and_the_rest(lines: list[str], at: int) -> tuple[str, str]:
+    """The tag on this line as the codec reads it: its name, whole up to the
+    brace it opens, and what stands after the name.
+
+    The line below counts, which is what makes a container named with spaces
+    read as one name: its brace is either the last word on the line or the whole
+    of the line under it, and either way nothing but the brace follows the name.
+    """
+    return _split_name(lines[at].strip(), _a_brace_is_next(lines, at + 1))
+
+
+def _the_rest_of_the_line(lines: list[str], at: int) -> str:
+    """What stands on this line after its tag's name, brace and all."""
+    return _the_name_and_the_rest(lines, at)[1]
 
 
 @dataclass(frozen=True)
@@ -870,7 +890,7 @@ def _a_mesh_table_is_already_there(lines: list[str]) -> str:
         return ""
     for at in tables:
         # the container's own body, which is where a default would be found
-        last, _ = _the_tag_takes_up_to(lines, at, _the_rest_of(lines[at].strip()))
+        last, _ = _the_tag_takes_up_to(lines, at, _the_rest_of_the_line(lines, at))
         if _the_lines_holding(lines[at + 1 : last + 1], "default"):
             return "a mesh-table with a default mesh is in the file"
     return "a mesh-table is in the file"
@@ -1329,8 +1349,9 @@ def _the_blocks_between(
         found = _A_NAME.match(lines[at])
         if found is None:
             return [], f"line {at + 1} holds {lines[at].strip()!r}, which is not a tag"
-        name = found.group(1)
-        rest = _the_rest_of(lines[at].strip())
+        # the name as the codec reads it, whole up to the brace it opens, so a
+        # container named with spaces is named in full wherever it is spoken of
+        name, rest = _the_name_and_the_rest(lines, at)
         last, because = _the_tag_takes_up_to(lines, at, rest)
         if because:
             return [], f"the {name} on line {at + 1} {because}"
@@ -1776,8 +1797,9 @@ def _the_tags_between(
         found = _A_NAME.match(lines[at])
         if found is None:
             return [], f"line {at + 1} holds {lines[at].strip()!r}, which is not a tag"
-        name = found.group(1)
-        rest = _the_rest_of(lines[at].strip())
+        # the name as the codec reads it, whole up to the brace it opens, so a
+        # container named with spaces is named in full wherever it is spoken of
+        name, rest = _the_name_and_the_rest(lines, at)
         last, because = _the_tag_takes_up_to(lines, at, rest)
         if because:
             return [], f"the {name} on line {at + 1} {because}"

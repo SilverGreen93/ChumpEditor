@@ -1530,6 +1530,41 @@ def test_blank_lines_go_above_a_container_and_under_it_even_when_no_tag_moves():
     ]
 
 
+def test_a_container_named_with_spaces_is_set_off_like_any_other():
+    """The tweaks read a name up to its brace too, so a container named after a
+    file name is one block that gets its blank lines and is named as written."""
+    text = (
+        'kind "interior"\n'
+        "screenshots\n"
+        "{\n"
+        "  2018-12-15 162811.jpg\n"
+        "  {\n"
+        '    tags "2019"\n'
+        "  }\n"
+        "}\n"
+    )
+    result = tweaks.reorder_tags(text)
+
+    assert not result.warning
+    assert result.text == (
+        'kind "interior"\n'
+        "\n"
+        "screenshots\n"
+        "{\n"
+        "  2018-12-15 162811.jpg\n"
+        "  {\n"
+        '    tags "2019"\n'
+        "  }\n"
+        "}\n"
+    )
+    # the inner container is the only tag of the outer one, so it is set off from
+    # nothing: not above its opening brace, and not at the end of the file.  The
+    # line is the one the blank stands on in the text that came back
+    assert [(one.tag, one.line, one.above) for one in result.gaps] == [
+        ("screenshots", 3, True)
+    ]
+
+
 def test_the_blank_lines_go_beside_the_containers_at_every_depth():
     """The subtags of a container are separated from each other as well."""
     text = (
