@@ -36,6 +36,7 @@ from PyQt6.QtWidgets import (  # noqa: E402
     QDockWidget,
     QFileDialog,
     QListWidget,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTextEdit,
@@ -1791,6 +1792,177 @@ def test_the_rows_of_a_broken_text_are_written_anyway(tree):
     assert tree.topLevelItem(0).text(0) == "table"
 
 
+def the_menu(tree, name: str) -> QMenu:
+    """The menu a right click on the ``name`` row would be offered.
+
+    A container's rows are looked for by their names, from the top down and depth
+    first, which is the order they are shown in; ``"file"`` means the file's own row,
+    asked for by identity since its text is whatever the window calls the file.  The
+    menu is asked of the panel's own handler rather than through a mouse event: an
+    offscreen tree cannot be right clicked into at all, as measured with PyQt6 6.12 -
+    ``QTest`` sends left clicks through and Qt never answers a synthesized right one
+    with ``customContextMenuRequested``.  What is tested is what the panel makes of a
+    row, which is everything a place in the tree would have been turned into.
+    """
+    if name == "file":
+        return tree._the_menu_for(tree.file_row)
+
+    def search(item) -> QMenu | None:
+        if item.text(0) == name:
+            return tree._the_menu_for(item)
+        for number in range(item.childCount()):
+            found = search(item.child(number))
+            if found is not None:
+                return found
+        return None
+
+    for number in range(tree.top_level_count()):
+        found = search(tree.topLevelItem(number))
+        if found is not None:
+            return found
+    raise AssertionError(f"the tree has no {name!r} row")
+
+
+def test_a_right_click_is_answered_for_the_row_it_landed_on(qapp, tree, monkeypatch):
+    """A right click hands over a place in the tree rather than a row.
+
+    The row is looked up from that place, so the menu answers for what was clicked on
+    and not for whatever happens to be selected; and the paper below the last row is
+    answered with nothing at all, as a right click on empty paper is everywhere else.
+    ``popup`` is answered rather than let loose: a menu put up off screen would sit
+    there in front of the test run.
+    """
+    tree.set_text(NESTED)
+
+    popped = []
+    monkeypatch.setattr(
+        QMenu, "popup",
+        lambda menu, where, *a: popped.append(
+            [plain(action.text()) for action in menu.actions()]
+        ),
+    )
+
+    corner = tree.tree.viewport().mapTo(tree.tree, QPoint(0, 0))
+    first = tree.tree.itemAt(QPoint(corner.x() + 6, corner.y() + 6))
+    assert first is not None
+    tree._a_row_was_right_clicked(QPoint(tree.tree.visualItemRect(first).center()))
+    assert popped == [["Delete"]]
+
+    # the paper below the last row.  The rows are walked rather than measured: an
+    # offscreen panel is laid out barely at all, so its own height says nothing about
+    # where the rows stand inside it
+    last = first
+    while tree.tree.itemBelow(last) is not None:
+        last = tree.tree.itemBelow(last)
+    paper = QPoint(corner.x() + 6, tree.tree.visualItemRect(last).bottom() + 4)
+    assert tree.tree.itemAt(paper) is None
+    tree._a_row_was_right_clicked(paper)
+    assert popped == [["Delete"]]
+
+
+def test_a_right_click_on_the_files_own_row_pops_nothing(qapp, tree, monkeypatch):
+    """The file's row stands for the whole text, not for a block that could come out
+    of it; with nothing to offer there is no menu put up at all, rather than an empty
+    one standing there waiting."""
+    tree.set_text(NESTED)
+
+    popped = []
+    monkeypatch.setattr(QMenu, "popup", lambda menu, where, *a: popped.append(menu))
+    place = QPoint(tree.tree.visualItemRect(tree.file_row).center())
+    assert tree.tree.itemAt(place) is tree.file_row
+
+    tree._a_row_was_right_clicked(place)
+    assert popped == []
+
+
+def test_a_right_click_on_a_container_pops_its_one_item(qapp, tree, monkeypatch):
+    """The one thing the menu is for, and it is put up rather than run.
+
+    ``exec`` would stand a loop in front of the window until something was chosen and
+    leave nothing to click past; ``popup`` goes away by itself, which is what a menu
+    over a list does everywhere else too.  Both an outer container and the empty one
+    at the end of the file are answered for.
+    """
+    tree.set_text(NESTED)
+
+    for name in ("mesh-table", "kuid-table"):
+        place = QPoint(*_a_place_on(tree, name))
+        assert tree.tree.itemAt(place).text(0) == name
+
+        popped = []
+        monkeypatch.setattr(
+            QMenu, "popup",
+            lambda menu, where, *a: popped.append(
+                [plain(action.text()) for action in menu.actions()]
+            ),
+        )
+        tree._a_row_was_right_clicked(place)
+
+        assert popped == [["Delete"]]
+
+
+def _a_place_on(tree, name: str) -> tuple[int, int]:
+    """A place in the tree that lands on the row named ``name``.
+
+    The panel is not shown for these tests, and an offscreen tree is laid out barely
+    at all - measured with PyQt6 6.12, two rows' worth of them - so the rows are walked
+    from the first one in sight until the name turns up, and that row's own rectangle
+    gives the place.  Only names near the top of a short file can be found this way,
+    which is why the nested row is asked about by its menu rather than by a click.
+    """
+    corner = tree.tree.viewport().mapTo(tree.tree, QPoint(0, 0))
+    row = tree.tree.itemAt(QPoint(corner.x() + 6, corner.y() + 6))
+    while row is not None and row.text(0) != name:
+        row = tree.tree.itemBelow(row)
+    assert row is not None, f"{name!r} is not laid out in the offscreen panel"
+    centre = tree.tree.visualItemRect(row).center()
+    return centre.x(), centre.y()
+
+
+def test_the_file_row_is_offered_nothing(qapp, tree):
+    """The file's own row holds no container, so there is nothing to take out of the
+    text: an empty menu rather than one holding a dead item."""
+    tree.set_text(NESTED)
+    assert the_menu(tree, "file").actions() == []
+
+
+def test_a_container_row_is_offered_one_item(qapp, tree):
+    """One item, and it says Delete - outer container, nested one and empty one
+    alike, since all three stand for a block of the text."""
+    tree.set_text(NESTED)
+    for name in ("mesh-table", "default", "effects", "kuid-table"):
+        menu = the_menu(tree, name)
+        assert [plain(action.text()) for action in menu.actions()] == ["Delete"]
+
+
+def test_choosing_the_item_says_which_container_to_take(qapp, tree):
+    """The line the row was written with, and nothing else.
+
+    Taking the block out is the window's business; the panel only says which line it
+    was asked about, exactly as a left click says which line to read.
+    """
+    tree.set_text(NESTED)
+    chosen = []
+    tree.removed.connect(chosen.append)
+
+    for name in ("mesh-table", "default", "effects", "kuid-table"):
+        the_menu(tree, name).actions()[0].trigger()
+
+    assert chosen == [2, 4, 8, 13]
+
+
+def test_a_row_of_text_that_moved_on_is_offered_nothing(qapp, tree):
+    """A row carrying no line has no block to take.
+
+    The rows are made from one reading of the text, and a container taken out from
+    under one leaves it standing until they are written again; its menu is empty
+    rather than one that would cut at a stale number.
+    """
+    tree.set_text(NESTED)
+    tree.topLevelItem(0).setData(0, Qt.ItemDataRole.UserRole, None)
+    assert the_menu(tree, "mesh-table").actions() == []
+
+
 # ---------------------------------------------------------------------------
 # the treeview in the window: the menu item, and what a click does
 # ---------------------------------------------------------------------------
@@ -2208,6 +2380,172 @@ def choose_row(window, name: str) -> None:
         if search(tree.topLevelItem(number)):
             return
     raise AssertionError(f"the tree has no {name!r} row")
+
+
+def menu_for(window, name: str) -> QMenu:
+    """The menu a right click on the window's ``name`` row would be offered.
+
+    The panel's own helper above, asked through this window: what is checked here is
+    the wiring between a row and the text beside it.  ``"file"`` means the file's row.
+    """
+    if name == "file":
+        return window.treeview._the_menu_for(window.treeview.file_row)
+
+    def search(item) -> QMenu | None:
+        if item.text(0) == name:
+            return window.treeview._the_menu_for(item)
+        for number in range(item.childCount()):
+            found = search(item.child(number))
+            if found is not None:
+                return found
+        return None
+
+    for number in range(window.treeview.top_level_count()):
+        found = search(window.treeview.topLevelItem(number))
+        if found is not None:
+            return found
+    raise AssertionError(f"the tree has no {name!r} row")
+
+
+def delete_row(window, name: str) -> None:
+    """Right click the ``name`` row and choose its Delete item."""
+    action = menu_for(window, name).actions()[0]
+    assert plain(action.text()) == "Delete"
+    action.trigger()
+
+
+def test_the_right_click_of_a_container_offers_one_item(window):
+    """The window's tree answers for the text it was given, and the file's own row
+    is offered nothing."""
+    window.editor.setPlainText(NESTED)
+    click(window, "View", "Treeview")
+
+    assert [
+        plain(action.text()) for action in menu_for(window, "mesh-table").actions()
+    ] == ["Delete"]
+    assert menu_for(window, "file").actions() == []
+
+
+def test_deleting_a_container_takes_the_block_out_of_the_text(window):
+    """What the item is for: the container, everything written inside it, and the
+    line ending with it."""
+    window.editor.setPlainText(NESTED)
+
+    delete_row(window, "mesh-table")
+
+    assert window.editor.toPlainText() == (
+        'kind                                    "interior"\n'
+        "kuid-table\n"
+        "{\n"
+        "}\n"
+    )
+
+
+def test_the_blank_line_over_a_container_goes_with_it(window):
+    """The gap over a container sets it off from the tags beside it; with the
+    container gone the gap only leaves a hole, so it is taken as part of the block.
+    ``effects`` in ``NESTED`` stands under one, inside ``default``."""
+    window.editor.setPlainText(NESTED)
+
+    delete_row(window, "effects")
+
+    assert window.editor.toPlainText() == (
+        "kind                                    \"interior\"\n"
+        "mesh-table\n"
+        "{\n"
+        "  default\n"
+        "  {\n"
+        "    mesh                                \"ind.im\"\n"
+        "  }\n"
+        "}\n"
+        "kuid-table\n"
+        "{\n"
+        "}\n"
+    )
+
+
+def test_the_rows_are_written_out_again_after_a_container_is_taken_out(window):
+    """The tree follows the text, so the deleted container's rows go with it and what
+    is left stands at its new line."""
+    window.editor.setPlainText(NESTED)
+    click(window, "View", "Treeview")
+
+    delete_row(window, "mesh-table")
+
+    assert [
+        window.treeview.topLevelItem(number).text(0)
+        for number in range(window.treeview.top_level_count())
+    ] == ["kuid-table"]
+    assert window.treeview.topLevelItem(0).data(0, Qt.ItemDataRole.UserRole) == 2
+
+
+def test_a_deleted_container_comes_back_in_one_press(window):
+    """One Undo takes the whole block back, which is why no confirmation box stands
+    in front of the item."""
+    window.editor.setPlainText(NESTED)
+
+    delete_row(window, "mesh-table")
+    click(window, "Edit", "Undo")
+
+    assert window.editor.toPlainText() == NESTED
+
+
+def test_deleting_the_last_container_is_not_cut_short(window):
+    """A container at the end of the file takes its own last line ending with it, so
+    the text does not finish with an empty line that was never written."""
+    window.editor.setPlainText(LASTED)
+
+    delete_row(window, "last")
+
+    assert window.editor.toPlainText() == (
+        "mesh-table\n"
+        "{\n"
+        "  kuid\n"
+        "  {\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def test_a_deletion_is_said_in_the_status_line(window):
+    """Said where the change can be seen, with no box to click past: the text itself
+    shows what was taken out."""
+    window.editor.setPlainText(NESTED)
+
+    delete_row(window, "effects")
+
+    assert window.statusBar().currentMessage() == (
+        "deleted the 'effects' container and what is written in it"
+    )
+
+
+def test_a_line_holding_no_container_deletes_nothing(window):
+    """A number that no longer names a container is left alone.
+
+    The rows are made from one reading of the text and can be answered after
+    another, exactly as a left click can; cutting at a stale number would take some
+    other block out of the file.
+    """
+    moved_on = NESTED.replace("kuid-table\n{\n}\n", "}\n")
+    window.editor.setPlainText(moved_on)
+
+    window._a_container_was_deleted(13)
+
+    assert window.editor.toPlainText() == moved_on
+    assert not window.editor.document().isModified()
+
+
+def test_a_container_that_never_closes_is_said_in_a_box(window, dialogs):
+    """Where its block should have ended has no answer, and guessing one would take
+    the rest of the file with it."""
+    window.editor.setPlainText("mesh-table\n{\n  default\n  {\n")
+
+    window._a_container_was_deleted(1)
+
+    assert window.editor.toPlainText() == "mesh-table\n{\n  default\n  {\n"
+    kind, title, text = dialogs[-1]
+    assert kind == "warn"
+    assert "'mesh-table'" in text and "never closed" in text
 
 
 # ---------------------------------------------------------------------------

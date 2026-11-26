@@ -3,7 +3,9 @@
 Free of Qt like ``search.py`` and ``tweaks.py``: the question "what is this file
 made of, and where" has an answer that has nothing to do with a window.  The
 tree beside the text in ``gui/treeview.py`` asks these questions about the text
-on screen, and the window moves the caret to the answers.
+on screen, and the window moves the caret to the answers.  The same file
+answers what taking one of those containers out of the text would do to it,
+which is a question about lines and braces rather than about a window either.
 
 A container here is a tag written with braces - ``kuid-table``, ``mesh-table``
 and whatever stands inside them - and nothing else: a tag holding one value on
@@ -36,9 +38,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .chump import _a_brace_below, _split_lines, _split_name
-from .tweaks import _opens_a_running_value
+from .tweaks import (
+    Rewrite,
+    _end_of,
+    _opens_a_running_value,
+    _split,
+    _start_of,
+    _the_name_and_the_rest,
+    _the_tag_takes_up_to,
+)
 
-__all__ = ["Container", "containers"]
+__all__ = ["Container", "ContainerBlock", "containers", "the_container_block"]
 
 
 @dataclass(frozen=True)
@@ -156,3 +166,181 @@ def _a_container(name: str, parents: list[str], at: int) -> Container:
     """One container, found on the line ``at`` counts from nought."""
     path = (*parents, name)
     return Container(name=name, level=len(parents), line=at + 1, path=path)
+
+
+@dataclass(frozen=True)
+class ContainerBlock:
+    """What deleting one container would do to the text.
+
+    The same shape every other answer in this package that changes text hands
+    over - ``tweaks.Tweaks``, ``tweaks.Sweep``, ``search.ReplaceAll`` - so the
+    window reports it the way it reports everything else: a status line for the
+    bar, a paragraph for a box, and the rewrites to lay on the text.
+
+    ``rewrites`` is empty when nothing can be deleted, and ``warning`` says
+    whether what happened is worth a box that has to be clicked past or only the
+    status line: text whose container never closes is a fault in the file, while a
+    row that turns out to name no block at all is a request with nothing in it,
+    said quietly and done with.
+    """
+
+    text: str
+    rewrites: tuple[Rewrite, ...] = ()
+    status: str = ""
+    warning: bool = False
+
+    def summary(self) -> str:
+        """The paragraph for the box: what went, and why nothing did if not."""
+        return self.status
+
+
+
+def _it_holds_a_container(lines: list[str], at: int) -> bool:
+    """Whether the tag on this line opens a container rather than holding a value.
+
+    The two shapes ``containers`` itself walks, read from the name's own line: a
+    brace standing behind the name with nothing else after it, or the name alone
+    with its brace taking the whole of the line below.  Anything else - a quoted
+    value, a number, a ``name {}`` written on one line, a tag with nothing after
+    it and no brace below - holds a value or holds nothing, and no row of the tree
+    stands for it.
+
+    Read off the lines rather than from what ``_the_name_and_the_rest`` says
+    follows the name: that hands back only the first word after it, so a container
+    whose name is written with spaces - one of the screenshot containers under a
+    ``.tdx`` - looks like a tag holding the value ``{``.  Asking the codec's own
+    ``_split_name`` cannot make that mistake, and cannot call one shape a container
+    here and another one in ``containers``.
+    """
+    stripped = lines[at].strip()
+    name, rest = _split_name(stripped, _a_brace_below(lines, at))
+    if not name or name == "{":
+        # the line is blank, or a brace standing on its own closing what was
+        # opened higher up
+        return False
+    if rest:
+        return rest == "{"
+    # nothing after the name: the brace is either the whole of the line below,
+    # which opens a container, or missing, which leaves a tag holding nothing
+    return _a_brace_below(lines, at) and lines[at + 1].strip() == "{"
+
+
+
+
+def the_container_block(text: str, line: int) -> ContainerBlock:
+    """Take the container written at ``line`` out of ``text``, with everything
+    written inside it.
+
+    ``line`` is the 1-based number of the line the container's *name* stands on -
+    the answer ``Container.line`` gives and the number down the left of the
+    editor, which is what a row of the tree carries - so the caller never has to
+    know that every helper here counts from nought.
+
+    Where the block ends is not counted out again here: it is asked of
+    ``tweaks._the_tag_takes_up_to``, the same walk that decides which tags
+    ``tweaks.remove_language_tags`` takes out and what ``chump`` reads as a
+    container, so a delete cannot cut a block somewhere other than where the
+    codec says one ends.  It follows a name whose brace stands behind it on the
+    same line (``kuid-table {}`` is one line of text, and one block), stops at
+    the closing brace of an outer container before any stray one further down,
+    and reads a multi-line quoted value as part of whatever stands around it
+    rather than as a brace.
+
+    Everything inside goes with it, which is what was asked for: right-clicking
+    ``mesh-table`` takes ``default``, the tags written in ``default``, and
+    ``mesh-table``'s own closing brace, because they are all between its name and
+    that brace.  The line ending goes too, so deleting a container leaves no
+    blank line where it stood; at the very end of the file there is no next line
+    to stand at, and the last line's own ending is taken instead, which keeps one
+    fewer empty line rather than adding one.
+
+    A blank line standing directly over the name goes with the block as well, for
+    the same reason: it is there to set this container off from what stands beside
+    it, and once the container is gone it sets nothing off.  ``_the_gap_above``
+    counts how far up that run of blanks runs; a container opening the file keeps
+    its place at the top, since there is nothing over its gap for the gap to part.
+
+    Two refusals, both answered without touching the text:
+
+    * nothing is written at ``line``, or what is written there is blank, a brace
+      on its own, or the closing end of some other container - there is no block
+      to take;
+    * the tag opens something that is never closed.  Where it should have ended
+      has no answer, and guessing one would delete the rest of the file, which is
+      what an unclosed ``mesh-table`` at the top of a broken config otherwise
+      swallows.
+
+    The first is said in the status bar; the second is put in a box as well,
+    because text that cannot say where its container ends is worth more than a
+    line at the bottom of the window.
+    """
+    lines, eol = _split(text)
+    at = line - 1
+    if not 0 <= at < len(lines):
+        return ContainerBlock(
+            text=text,
+            status="there is nothing written on that line",
+            warning=False,
+        )
+    name, rest = _the_name_and_the_rest(lines, at)
+    if not name:
+        return ContainerBlock(
+            text=text,
+            status="there is no tag written on that line",
+            warning=False,
+        )
+    if not _it_holds_a_container(lines, at):
+        # the tag holds a value rather than opening a container.  No row of the
+        # tree stands for one, so this is only reached when the text has moved
+        # since the rows were written out; either way there is no block here
+        return ContainerBlock(
+            text=text,
+            status=f"that line does not hold the name of a container",
+            warning=False,
+        )
+    last, because = _the_tag_takes_up_to(lines, at, rest)
+    if because:
+        # the block has no end to cut at, and guessing one would take the rest of
+        # the file with it
+        return ContainerBlock(
+            text=text,
+            status=f"the {name!r} container {because}",
+            warning=True,
+        )
+    # the block runs from the first character of the name's line to the first
+    # character of the line after it, which takes the closing brace and the line
+    # ending with it; see remove_language_tags for the same step at the end of a
+    # file, where there is no next line to stand at
+    start = _start_of(lines, eol, _the_gap_above(lines, at))
+    end = (
+        _start_of(lines, eol, last + 1)
+        if last + 1 < len(lines)
+        else _end_of(lines, eol, last)
+    )
+    return ContainerBlock(
+        text=text,
+        rewrites=(Rewrite(start=start, end=end, text=""),),
+        status=f"deleted the {name!r} container and what is written in it",
+    )
+
+
+def _the_gap_above(lines: list[str], at: int) -> int:
+    """The first line of the block naming ``at``, taking the blank lines above it.
+
+    A container stands off from the tags beside it by a blank line - which is what
+    ``tweaks.reorder_tags`` puts right - and that gap exists to set *this* container
+    off.  Once the container is gone the gap sets nothing off, so it goes with the
+    block; leaving it would leave a hole where the container stood, and one blank
+    line too many between what was above and what was below.
+
+    Only the run of blanks directly above is taken, and only when there is a line
+    written over it: a gap with nothing above it is not parting anything from the
+    container, it is the start of the text, and taking it would move what stands at
+    the top of the file up over it.
+    """
+    if at == 0:
+        return 0
+    first = at
+    while first > 0 and not lines[first - 1].strip():
+        first -= 1
+    return first if first else at

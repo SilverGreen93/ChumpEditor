@@ -54,7 +54,7 @@ from ..document import (
     save_text,
     suggested_path,
 )
-from ..outline import containers
+from ..outline import ContainerBlock, containers, the_container_block
 from ..recent import RecentFiles
 from ..settings import Settings
 from .about import ABOUT_TITLE, about_html
@@ -238,6 +238,7 @@ class ChumpWindow(QMainWindow):
         # are left exactly as they are
         self.treeview = ContainerTree(self)
         self.treeview.picked.connect(self.reveal_line)
+        self.treeview.removed.connect(self._a_container_was_deleted)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.treeview)
 
         # when the size of the text changes - turned by Ctrl and the wheel, or
@@ -681,11 +682,33 @@ class ChumpWindow(QMainWindow):
             return
         self.editor.set_font_size(points)
 
+    def _a_container_was_deleted(self, line: int) -> None:
+        """Take one container - and everything written inside it - out of the text.
+
+        The panel says only which row was asked, by the number written beside its
+        name; this is where that becomes an answer about the text.  ``outline``
+        says how far the block runs and what stands in its way, and the change is
+        laid on the editor as edits rather than as a new document, so one Undo
+        takes the whole of it back and the caret keeps the place it had.
+
+        The rows write themselves out again on the change Qt sends afterwards,
+        which is what takes the deleted container's row - and those of anything
+        nested in it - away; nothing here reaches into the tree.  A delete that
+        found no block leaves the text alone and says so, which is the one thing
+        a row asked for by right click can be told about.
+        """
+        self._tweak("Delete container", lambda text: the_container_block(text, line))
+
     def _tweak(
         self,
         title: str,
         tidy: Callable[
-            [str], tweaks.Tweaks | tweaks.Sweep | tweaks.MeshTables | tweaks.Order
+            [str],
+            tweaks.Tweaks
+            | tweaks.Sweep
+            | tweaks.MeshTables
+            | tweaks.Order
+            | ContainerBlock,
         ],
     ) -> None:
         """One tidy-up over the text on screen, and then an account of it.
@@ -700,6 +723,12 @@ class ChumpWindow(QMainWindow):
         if result.rewrites:
             self.editor.apply_rewrites(result.rewrites)
         self.say(result.status)
+        if isinstance(result, ContainerBlock) and not result.warning:
+            # a delete that found no block of its own - a line that names nothing,
+            # or holds a value rather than a container - says itself in the status
+            # line; there is nothing there for a box to add.  A block that cannot be
+            # cut at all is another matter, and keeps its box below
+            return
         box = QMessageBox.warning if result.warning else QMessageBox.information
         box(self, title, result.summary())
 

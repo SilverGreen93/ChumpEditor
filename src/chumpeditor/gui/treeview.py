@@ -33,6 +33,7 @@ from PyQt6.QtCore import QPointF, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPalette, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QDockWidget,
+    QMenu,
     QProxyStyle,
     QStyle,
     QTreeWidget,
@@ -299,6 +300,11 @@ class ContainerTree(QDockWidget):
     #: numbers down the left of the editor count; the window moves the caret
     picked = pyqtSignal(int)
 
+    #: the line of the container whose row asked for it to be deleted, counted
+    #: the same way; whether that block can be taken out of this text at all is
+    #: the window's business rather than the panel's
+    removed = pyqtSignal(int)
+
     def __init__(self, parent=None) -> None:
         super().__init__(PANEL_TITLE, parent)
         # part of the window, not a little window of its own: no title bar to
@@ -327,6 +333,12 @@ class ContainerTree(QDockWidget):
         # why the desktop styles cannot be left to draw the lines themselves
         self.tree.setRootIsDecorated(True)
         self.tree.itemClicked.connect(self._a_row_was_chosen)
+        # a right click is answered here rather than by the tree's own menu,
+        # which would be empty: measured with PyQt6 6.12, an ordinary tree
+        # shows nothing at all on a right click, and no style offers anything
+        # for these rows, so the menu has to be asked for by name
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._a_row_was_right_clicked)
         # the file itself stands at the top of the tree with everything written in
         # it below, the way every other application shows a file: the names then
         # read as the contents of one named thing rather than a list with nothing
@@ -425,3 +437,60 @@ class ContainerTree(QDockWidget):
         if line:
             self.picked.emit(int(line))
 
+    # -- the right click -----------------------------------------------------
+    def _a_row_was_right_clicked(self, place: QPoint) -> None:
+        """Offer the menu of the row under the mouse.
+
+        ``customContextMenuRequested`` answers a right click anywhere in the
+        tree, and hands over where in it rather than what was clicked there, so
+        the row is looked up by that place first.  There may be no row at all -
+        the paper below the last one is part of the tree - and then nothing is
+        said or shown, which is what a right click on empty paper does in every
+        other application.
+
+        The menu is popped rather than run, so it goes away by itself when the
+        mouse is let go or clicked elsewhere; ``exec`` would stand a loop in
+        front of the window until an item was chosen, and leave nothing to click
+        past.  The place is given as a point on the screen, which is where Qt
+        wants a menu put; the viewport's own place is taken from the tree's.
+        """
+        row = self.tree.itemAt(place)
+        if row is None:
+            return
+        menu = self._the_menu_for(row)
+        if not menu.actions():
+            # the file's own row, and any row that names no container in the
+            # text: there is nothing here to offer, so nothing is shown
+            menu.deleteLater()
+            return
+        menu.popup(self.tree.viewport().mapToGlobal(place))
+
+    def _the_menu_for(self, row: QTreeWidgetItem) -> QMenu:
+        """The menu a right click on ``row`` asks for.
+
+        One item, because deleting the block is the only thing a row can be
+        asked to do that the text does not already answer better - and it is the
+        one thing no keyboard shortcut in this window offers.  The ampersand is
+        the underlined letter, which is how every Windows menu says which key
+        chooses an item.
+
+        A container's own line is read off the row rather than looked up again:
+        it was written there when the rows were made, and it is the same answer
+        a click sends out, so the menu cannot name a block that has moved since.
+
+        The file's row - and any row carrying no line, which is what a row whose
+        container has gone away from the text leaves behind until the rows are
+        written out again - gets an empty menu rather than ``None``, because it
+        is a thing asked to be shown and there is simply nothing in it.
+        """
+        menu = QMenu(self.tree)
+        line = row.data(0, Qt.ItemDataRole.UserRole)
+        if not line:
+            return menu
+        action = menu.addAction("&Delete")
+        # the line is caught here rather than read off the row when the item is
+        # chosen, because a menu stays open over rows that may have been written
+        # out again in the meantime, and a delete aimed at the wrong block is
+        # worse than one that does nothing
+        action.triggered.connect(lambda _checked=False, one=int(line): self.removed.emit(one))
+        return menu
